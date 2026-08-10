@@ -219,26 +219,26 @@
     openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
   });
 
-  function fallbackCopy(text) {
+  /* Synchronous on purpose - document.execCommand('copy') runs and finishes
+     in the same tick, unlike navigator.clipboard.writeText() which resolves
+     as a microtask. That distinction mattered here: writing to the clipboard
+     *after* kicking off window.open() raced the new tab taking focus, and
+     losing that race makes Clipboard API throw "document is not focused" -
+     silently, since nothing awaited it. That silent failure is exactly what
+     "no pre-filled text at all" looks like. Copying first and only opening
+     the tab once the copy has actually finished removes the race. */
+  function copyToClipboard(text) {
     var area = document.createElement('textarea');
     area.value = text;
     area.style.position = 'fixed';
     area.style.opacity = '0';
     document.body.appendChild(area);
+    area.focus();
     area.select();
-    try { document.execCommand('copy'); } catch (e) {}
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
     document.body.removeChild(area);
-  }
-
-  // The Clipboard API can reject (unfocused document, denied permission) even
-  // when it exists, so the execCommand fallback is also the error path, not
-  // just the missing-API path.
-  function copyToClipboard(text) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
-    }
-    fallbackCopy(text);
-    return Promise.resolve();
+    return ok;
   }
 
   function flashShareNote(msg) {
@@ -253,14 +253,15 @@
     var link = el('link').value.trim();
 
     // LinkedIn stopped honouring title/summary params years ago - the old
-    // shareArticle endpoint silently drops them, which is exactly the "no
-    // pre-filled text" report. Their only supported param today is url, and
-    // the post body is whatever the person types themselves. Best we can do
-    // without that param is put the caption on the clipboard first, so a
-    // paste finishes the job LinkedIn won't let a link do.
-    copyToClipboard(shareText()).then(function () {
-      flashShareNote('caption copied — paste it into your LinkedIn post');
-    });
+    // shareArticle endpoint silently drops them. Their only supported param
+    // today is url, and the post body is whatever the person types
+    // themselves. Best we can do without that param is put the caption on
+    // the clipboard first, so a paste finishes the job LinkedIn won't let a
+    // link do.
+    var copied = copyToClipboard(shareText());
+    flashShareNote(copied
+      ? 'caption copied — paste it into your LinkedIn post'
+      : "couldn't copy automatically — write your own line before posting");
 
     openShare('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(link || 'https://tal.club/'));
   });
