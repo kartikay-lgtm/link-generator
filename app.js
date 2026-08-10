@@ -197,19 +197,22 @@
     }
   });
 
-  /* Same p.s. copy as the box above it, so the post reads like the page. The
-     link rides inside the text itself rather than a separate url param -
+  /* The link rides inside the text itself rather than a separate url param -
      X folds a bare url param into the text anyway, and this way the message
      still reads right if a platform only keeps one of the two. */
   function shareText() {
     var link = el('link').value.trim();
-    var msg = 'If you like Tal, share it with other bosses you know, and you can win ' +
-      'gifts up to ₹10,000, including Taj and Amazon.';
-    return link ? msg + ' ' + link : msg;
+    var msg = "I'm hiring on Tal. It's the app where bosses of Bangalore can hire great talent.";
+    return link ? msg + '\n' + link : msg;
   }
 
+  /* A plain new tab, not a popup window: no width/height/left/top means the
+     browser opens it exactly like a normal clicked link, which is what looks
+     right and behaves right on a phone - a fixed-size popup either gets
+     ignored in favour of a full tab there anyway, or renders too small to
+     use. */
   function openShare(url) {
-    window.open(url, '_blank', 'noopener,noreferrer,width=600,height=640');
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
   el('share-x').addEventListener('click', function () {

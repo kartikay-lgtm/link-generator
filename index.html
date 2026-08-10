@@ -119,7 +119,10 @@
     color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16); border-radius:999px;
     cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
   }
-  .share-btn:hover{background:rgba(10,10,10,0.04); transform:translateY(-1px)}
+  /* Doubled class beats the generic button:hover rule above, which otherwise
+     wins on specificity (element + 2 pseudo-classes) and paints this black
+     without also flipping the text, leaving black-on-black. */
+  .share-btn.share-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
   .share-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
   .share-btn svg{flex:0 0 auto}
 
@@ -137,10 +140,10 @@
 
   <!-- ── page 1: the form ──────────────────────────────────────── -->
   <section id="view-form">
-    <h1 class="serif">Founding Boss Referral Program</h1>
-    <p class="lede">fill in your details and we will generate a referral link that is
-      yours alone. share it with the bosses you know, and everyone who joins through it
-      is counted to you.</p>
+    <h1 class="serif">founding boss referral program</h1>
+    <p class="lede">fill in your details and we'll generate a referral link that is
+      yours alone. share it with the bosses you know, and every eligible boss who joins
+      through that link will be attributed to you.</p>
 
     <div class="rule"></div>
 
