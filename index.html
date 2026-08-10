@@ -124,16 +124,28 @@
   .share-btn svg{flex:0 0 auto}
   .share-note{margin-top:12px; font-size:12.5px; line-height:1.4; color:#6E6E72; text-align:center}
 
-  .linkedin-group{display:flex; gap:10px; align-items:center; width:100%}
+  /* One seamless pill, same width and height as the X button above it,
+     rather than a small floating circle next to a separate button - that
+     read as two unrelated controls instead of one row. The border and
+     radius live on the group; the two buttons inside are borderless and
+     share-btn.hover's own radius doesn't fight the container's. */
+  .linkedin-group{
+    display:flex; align-items:stretch; width:100%; min-height:48px;
+    border:1px solid rgba(10,10,10,0.16); border-radius:999px; overflow:hidden;
+  }
+  .linkedin-group .icon-btn,
+  .linkedin-group .share-btn{border:none; border-radius:0}
+  .linkedin-group .share-btn.share-btn:hover{transform:none}
+  .linkedin-group .icon-btn{border-right:1px solid rgba(10,10,10,0.16)}
   .linkedin-group .share-btn{flex:1 1 auto}
   .icon-btn{
     display:flex; align-items:center; justify-content:center; flex:0 0 auto;
-    width:48px; height:48px; padding:0;
-    color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16); border-radius:50%;
-    cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+    width:52px; padding:0;
+    color:#0A0A0A; background:#FFFFFF;
+    cursor:pointer; transition:background-color 120ms ease;
   }
-  .icon-btn.icon-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
-  .icon-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
+  .icon-btn.icon-btn:hover{background:#0A0A0A; color:#FFFFFF}
+  .icon-btn:focus-visible{outline:none; box-shadow:inset 0 0 0 3px rgba(10,10,10,0.18)}
 
   footer{margin-top:34px; font-size:12px; line-height:1.6; color:#6E6E72; text-align:center}
 
@@ -198,9 +210,9 @@
 
     <div class="ps">
       <div class="cap">p.s.</div>
-      <p>if you like tal, share it with other bosses that you know. upon every eligible boss
-        approved, you win gifts. win a fitbit, a kindle, or amazon vouchers worth up to</p>
-      <div class="amount">₹15,000</div>
+      <p>if you like tal, share it with other bosses that you know. get a fitbit, a kindle, or
+        amazon vouchers with every approved eligible boss.</p>
+      <div class="amount">up to ₹15,000</div>
     </div>
 
     <div class="share-row">
