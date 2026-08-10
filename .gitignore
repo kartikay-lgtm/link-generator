@@ -1,0 +1,5 @@
+# Vercel's local project linkage — machine-specific, not source
+.vercel
+
+# macOS
+.DS_Store
