@@ -124,7 +124,18 @@
   .share-btn svg{flex:0 0 auto}
   .share-note{margin-top:12px; font-size:12.5px; line-height:1.4; color:#6E6E72; text-align:center}
 
-  footer{margin-top:34px; font-size:12px; line-height:1.6; color:#6E6E72; text-align:right}
+  .linkedin-group{display:flex; gap:10px; align-items:center; width:100%}
+  .linkedin-group .share-btn{flex:1 1 auto}
+  .icon-btn{
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+    width:48px; height:48px; padding:0;
+    color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16); border-radius:50%;
+    cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+  }
+  .icon-btn.icon-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
+  .icon-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
+
+  footer{margin-top:34px; font-size:12px; line-height:1.6; color:#6E6E72; text-align:center}
 
   .hidden{display:none}
   @media (prefers-reduced-motion: reduce){
@@ -187,7 +198,8 @@
 
     <div class="ps">
       <div class="cap">p.s.</div>
-      <p>win amazon vouchers, a fitbit, or a kindle worth up to</p>
+      <p>if you like tal, share it with other bosses that you know. upon every eligible boss
+        approved, you win gifts. win a fitbit, a kindle, or amazon vouchers worth up to</p>
       <div class="amount">₹15,000</div>
     </div>
 
@@ -196,10 +208,18 @@
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
         Share on X
       </button>
-      <button type="button" class="share-btn" id="share-linkedin">
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/></svg>
-        Share on LinkedIn
-      </button>
+    </div>
+
+    <div class="share-row">
+      <div class="linkedin-group">
+        <button type="button" class="icon-btn" id="linkedin-copy" aria-label="Copy the LinkedIn caption" title="Copy caption">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+        </button>
+        <button type="button" class="share-btn" id="share-linkedin">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/></svg>
+          Post on LinkedIn
+        </button>
+      </div>
     </div>
     <div class="share-note hidden" id="share-note" role="status"></div>
 

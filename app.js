@@ -202,7 +202,7 @@
      still reads right if a platform only keeps one of the two. */
   function shareText() {
     var link = el('link').value.trim();
-    var msg = "I'm hiring on Tal. It's the app where bosses of Bangalore can hire great talent.";
+    var msg = "I'm hiring on Tal. It's an app where bosses hire directly.";
     return link ? msg + '\n' + link : msg;
   }
 
@@ -249,22 +249,25 @@
     flashShareNote._t = setTimeout(function () { note.classList.add('hidden'); }, 4000);
   }
 
-  el('share-linkedin').addEventListener('click', function () {
+  // LinkedIn stopped honouring title/summary params years ago - the old
+  // shareArticle endpoint silently drops them. Their only supported param
+  // today is url, and the post body is whatever the person types
+  // themselves. So both controls here - the small copy icon and the "Post
+  // on LinkedIn" button - do the same two things: copy the caption, then
+  // open a fresh LinkedIn post for it to be pasted into.
+  function linkedinShare() {
     var link = el('link').value.trim();
 
-    // LinkedIn stopped honouring title/summary params years ago - the old
-    // shareArticle endpoint silently drops them. Their only supported param
-    // today is url, and the post body is whatever the person types
-    // themselves. Best we can do without that param is put the caption on
-    // the clipboard first, so a paste finishes the job LinkedIn won't let a
-    // link do.
     var copied = copyToClipboard(shareText());
     flashShareNote(copied
       ? 'caption copied — paste it into your LinkedIn post'
       : "couldn't copy automatically — write your own line before posting");
 
     openShare('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(link || 'https://tal.club/'));
-  });
+  }
+
+  el('linkedin-copy').addEventListener('click', linkedinShare);
+  el('share-linkedin').addEventListener('click', linkedinShare);
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
