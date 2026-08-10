@@ -43,7 +43,10 @@
   .serif{font-family:'Instrument Serif',Georgia,'Times New Roman',serif; font-weight:400; letter-spacing:-0.02em}
 
   header{padding:40px 0 32px}
-  header img{display:block; width:min(150px,44%); height:auto}
+  /* Narrower than the old wordmark: the BOSS lockup is near square (1.1:1)
+     rather than 1.6:1, so matching the old width would make it half again
+     as tall and let it dominate the page. */
+  header img{display:block; width:min(112px,32%); height:auto}
 
   h1{margin:0; font-size:clamp(2.1rem,5vw,3.1rem); line-height:1.06; text-wrap:balance}
   .lede{margin:16px 0 0; color:#6E6E72; text-wrap:pretty}
@@ -159,7 +162,9 @@
 
 <div class="wrap">
 
-  <header><img src="./assets/tal-mark.png" alt="tal"></header>
+  <!-- Outside both sections on purpose: one header serves the form and the
+       result page, so the mark never disappears when the view swaps. -->
+  <header><img src="./assets/tal-boss.png" alt="tal boss"></header>
 
   <!-- ── page 1: the form ──────────────────────────────────────── -->
   <section id="view-form">
