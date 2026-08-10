@@ -215,10 +215,6 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  el('share-x').addEventListener('click', function () {
-    openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
-  });
-
   /* Synchronous on purpose - document.execCommand('copy') runs and finishes
      in the same tick, unlike navigator.clipboard.writeText() which resolves
      as a microtask. That distinction mattered here: writing to the clipboard
@@ -249,25 +245,36 @@
     flashShareNote._t = setTimeout(function () { note.classList.add('hidden'); }, 4000);
   }
 
+  el('copy-content').addEventListener('click', function () {
+    var label = el('copy-content-label');
+    var copied = copyToClipboard(shareText());
+
+    if (copied) {
+      label.textContent = 'Copied — now paste it in your post';
+      clearTimeout(label._t);
+      label._t = setTimeout(function () { label.textContent = 'Copy content'; }, 2600);
+    } else {
+      flashShareNote("couldn't copy automatically — select the text by hand before posting");
+    }
+  });
+
+  /* Both post buttons copy again on the way out. Whoever pressed Copy
+     content first loses nothing by it, and whoever skipped straight to a
+     platform still arrives with the caption on their clipboard. */
+  el('share-x').addEventListener('click', function () {
+    copyToClipboard(shareText());
+    openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
+  });
+
   // LinkedIn stopped honouring title/summary params years ago - the old
   // shareArticle endpoint silently drops them. Their only supported param
   // today is url, and the post body is whatever the person types
-  // themselves. So both controls here - the small copy icon and the "Post
-  // on LinkedIn" button - do the same two things: copy the caption, then
-  // open a fresh LinkedIn post for it to be pasted into.
-  function linkedinShare() {
+  // themselves, which is exactly why the copy button above exists.
+  el('share-linkedin').addEventListener('click', function () {
     var link = el('link').value.trim();
-
-    var copied = copyToClipboard(shareText());
-    flashShareNote(copied
-      ? 'caption copied — paste it into your LinkedIn post'
-      : "couldn't copy automatically — write your own line before posting");
-
+    copyToClipboard(shareText());
     openShare('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(link || 'https://tal.club/'));
-  }
-
-  el('linkedin-copy').addEventListener('click', linkedinShare);
-  el('share-linkedin').addEventListener('click', linkedinShare);
+  });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();

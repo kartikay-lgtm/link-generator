@@ -108,10 +108,28 @@
   .ps p{margin:11px 0 0; font-size:15.5px; line-height:1.58; text-wrap:pretty}
   .amount{margin-top:14px; font-weight:600; font-size:clamp(1.4rem,3vw,1.75rem);
     line-height:1.2; letter-spacing:-0.01em}
-  .share-row{display:flex; gap:10px; margin-top:18px; flex-wrap:wrap}
+  /* Copy first, then post. The copy button is the filled one because it is
+     the step that actually has to happen - neither X nor LinkedIn accepts
+     pre-filled text reliably, so the caption has to be on the clipboard
+     before either of the two below is worth pressing. */
+  .copy-btn{
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    width:100%; margin-top:18px; min-height:52px; padding:14px 20px;
+    font-family:inherit; font-size:15.5px; line-height:1.2; letter-spacing:0.01em;
+    color:#FFFFFF; background:#0A0A0A; border:none; border-radius:999px;
+    cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+  }
+  .copy-btn:hover{background:#3A3A37; transform:translateY(-1px)}
+  .copy-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.26)}
+  .copy-btn svg{flex:0 0 auto}
+
+  /* flex-basis 0 rather than auto, so the two halves stay equal regardless
+     of which label is longer - "Post on LinkedIn" is wider than "Post on X"
+     and with auto it would take the larger share. */
+  .share-row{display:flex; gap:10px; margin-top:10px}
   .share-btn{
     display:flex; align-items:center; justify-content:center; gap:8px;
-    flex:1 1 160px; width:auto; margin-top:0; min-height:48px; padding:12px 16px;
+    flex:1 1 0; min-width:0; width:auto; margin-top:0; min-height:48px; padding:12px 14px;
     font-family:inherit; font-size:14.5px; line-height:1.2; letter-spacing:0.01em;
     color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16); border-radius:999px;
     cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
@@ -122,30 +140,14 @@
   .share-btn.share-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
   .share-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
   .share-btn svg{flex:0 0 auto}
+  /* On a phone the halves are ~164px and "Post on LinkedIn" wraps to two
+     lines while "Post on X" stays on one, so the pair reads as uneven even
+     though the boxes match. Tighten the label rather than let it break. */
+  .share-btn{white-space:nowrap}
+  @media (max-width: 430px){
+    .share-btn{font-size:13.5px; padding:12px 10px; gap:6px}
+  }
   .share-note{margin-top:12px; font-size:12.5px; line-height:1.4; color:#6E6E72; text-align:center}
-
-  /* One seamless pill, same width and height as the X button above it,
-     rather than a small floating circle next to a separate button - that
-     read as two unrelated controls instead of one row. The border and
-     radius live on the group; the two buttons inside are borderless and
-     share-btn.hover's own radius doesn't fight the container's. */
-  .linkedin-group{
-    display:flex; align-items:stretch; width:100%; min-height:48px;
-    border:1px solid rgba(10,10,10,0.16); border-radius:999px; overflow:hidden;
-  }
-  .linkedin-group .icon-btn,
-  .linkedin-group .share-btn{border:none; border-radius:0}
-  .linkedin-group .share-btn.share-btn:hover{transform:none}
-  .linkedin-group .icon-btn{border-right:1px solid rgba(10,10,10,0.16)}
-  .linkedin-group .share-btn{flex:1 1 auto}
-  .icon-btn{
-    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
-    width:52px; padding:0;
-    color:#0A0A0A; background:#FFFFFF;
-    cursor:pointer; transition:background-color 120ms ease;
-  }
-  .icon-btn.icon-btn:hover{background:#0A0A0A; color:#FFFFFF}
-  .icon-btn:focus-visible{outline:none; box-shadow:inset 0 0 0 3px rgba(10,10,10,0.18)}
 
   footer{margin-top:34px; font-size:12px; line-height:1.6; color:#6E6E72; text-align:center}
 
@@ -215,23 +217,20 @@
       <div class="amount">up to ₹15,000</div>
     </div>
 
+    <button type="button" class="copy-btn" id="copy-content">
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+      <span id="copy-content-label">Copy content</span>
+    </button>
+
     <div class="share-row">
       <button type="button" class="share-btn" id="share-x">
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-        Share on X
+        Post on X
       </button>
-    </div>
-
-    <div class="share-row">
-      <div class="linkedin-group">
-        <button type="button" class="icon-btn" id="linkedin-copy" aria-label="Copy the LinkedIn caption" title="Copy caption">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
-        </button>
-        <button type="button" class="share-btn" id="share-linkedin">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/></svg>
-          Post on LinkedIn
-        </button>
-      </div>
+      <button type="button" class="share-btn" id="share-linkedin">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/></svg>
+        Post on LinkedIn
+      </button>
     </div>
     <div class="share-note hidden" id="share-note" role="status"></div>
 
