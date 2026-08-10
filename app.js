@@ -219,21 +219,50 @@
     openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
   });
 
+  function fallbackCopy(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(area);
+  }
+
+  // The Clipboard API can reject (unfocused document, denied permission) even
+  // when it exists, so the execCommand fallback is also the error path, not
+  // just the missing-API path.
+  function copyToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () { fallbackCopy(text); });
+    }
+    fallbackCopy(text);
+    return Promise.resolve();
+  }
+
+  function flashShareNote(msg) {
+    var note = el('share-note');
+    note.textContent = msg;
+    note.classList.remove('hidden');
+    clearTimeout(flashShareNote._t);
+    flashShareNote._t = setTimeout(function () { note.classList.add('hidden'); }, 4000);
+  }
+
   el('share-linkedin').addEventListener('click', function () {
     var link = el('link').value.trim();
-    // LinkedIn's share endpoint only guarantees the url param; title/summary
-    // are best-effort and often lost in favour of whatever the target page's
-    // own OG tags say. Passing them anyway costs nothing.
-    var params = {
-      mini: 'true',
-      url: link || 'https://tal.club/',
-      title: 'Tal — Founding Boss Referral Program',
-      summary: shareText()
-    };
-    var qs = Object.keys(params).map(function (k) {
-      return k + '=' + encodeURIComponent(params[k]);
-    }).join('&');
-    openShare('https://www.linkedin.com/shareArticle?' + qs);
+
+    // LinkedIn stopped honouring title/summary params years ago - the old
+    // shareArticle endpoint silently drops them, which is exactly the "no
+    // pre-filled text" report. Their only supported param today is url, and
+    // the post body is whatever the person types themselves. Best we can do
+    // without that param is put the caption on the clipboard first, so a
+    // paste finishes the job LinkedIn won't let a link do.
+    copyToClipboard(shareText()).then(function () {
+      flashShareNote('caption copied — paste it into your LinkedIn post');
+    });
+
+    openShare('https://www.linkedin.com/sharing/share-offsite/?url=' + encodeURIComponent(link || 'https://tal.club/'));
   });
 
   form.addEventListener('submit', function (e) {
