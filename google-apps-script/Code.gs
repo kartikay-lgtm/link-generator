@@ -1103,6 +1103,150 @@ function resetSheets() {
   }
 }
 
+/**
+ * The people to put at the top of a fresh sheet, in order. Edit this list and
+ * re-run seedEntries() to change it.
+ */
+var SEED_NAMES = [
+  'Zoheb Arif',
+  'Zoheb Arif',
+  'Akshaya Gupta',
+  'Zoheb A',
+  'Anubhav Jha',
+  'Sabil Abdullakutty'
+];
+
+/** Every campaign on the account keyed by its name, lowercased. */
+function campaignsByName_() {
+  var byId = fetchAllCampaigns_();
+  var byName = {}, seen = [];
+  Object.keys(byId).forEach(function (k) {
+    var c = byId[k];
+    if (seen.indexOf(c) !== -1) return;   // indexed under up to two keys
+    seen.push(c);
+    var n = String(c.name || '').trim().toLowerCase();
+    if (n && !byName[n]) byName[n] = c;
+  });
+  return byName;
+}
+
+/**
+ * Writes the SEED_NAMES people in at the top, so new signups append below.
+ *
+ * Attaches the link each person ALREADY has on Linkrunner - matched on the
+ * campaign named "Referral - <that person>". It never mints. A new link would
+ * strand whatever clicks and installs the existing one has already earned,
+ * leaving that history attached to a code nobody is sharing.
+ *
+ * A name with no matching campaign is reported and skipped rather than
+ * guessed at: a row carrying the wrong person's link is worse than no row.
+ *
+ * A name listed twice gets the SAME link twice rather than two, since one
+ * person holding two codes would split their own attribution.
+ *
+ * Claim ids are deterministic (seed-1, seed-2, ...), so running this twice
+ * skips anyone already present instead of duplicating them.
+ */
+function seedEntries() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('No spreadsheet attached.');
+
+  var byName = campaignsByName_();
+  var added = 0, skipped = 0, unmatched = [];
+  var report = [];
+
+  for (var i = 0; i < SEED_NAMES.length; i++) {
+    var name = String(SEED_NAMES[i]).trim();
+    if (!name) continue;
+
+    var claimId = 'seed-' + (i + 1);
+    var campaign = byName['referral - ' + name.toLowerCase()];
+
+    if (!campaign) {
+      // Offer the closest candidates so the right code can be identified by
+      // hand, rather than silently inventing one.
+      var first = name.split(/\s+/)[0].toLowerCase();
+      var near = Object.keys(byName)
+        .filter(function (k) { return k.indexOf(first) !== -1; })
+        .map(function (k) { return byName[k].name + ' (' + byName[k].display_id + ')'; })
+        .slice(0, 4);
+
+      unmatched.push(name);
+      report.push('  ' + name + ' - NO existing campaign, skipped' +
+                  (near.length ? '. Closest: ' + near.join(', ') : ''));
+      continue;
+    }
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(45000)) throw new Error('Sheet busy - try again in a moment.');
+
+    try {
+      var sheet = getSheet_();
+      if (findRow_(sheet, claimId)) {
+        skipped++;
+        report.push('  ' + name + ' - already present, left alone');
+        continue;
+      }
+
+      var link = String(campaign.link || '');
+      var code = String(campaign.display_id || '');
+
+      var row = firstFreeRow_(sheet);
+      sheet.getRange(row, HEADERS.indexOf('Phone') + 1).setNumberFormat('@');
+      sheet.getRange(row, 1, 1, HEADERS.length).setValues([[
+        new Date(), name, '', '', link, code, '', claimId, 'seeded'
+      ]]);
+      added++;
+      report.push('  ' + name + ' - ' + code + ' (existing link, history kept)');
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  Logger.log(
+    'Seeded ' + added + ' entr' + (added === 1 ? 'y' : 'ies') +
+    (skipped ? ', ' + skipped + ' already there' : '') +
+    (unmatched.length ? ', ' + unmatched.length + ' with no existing link' : '') +
+    '. No links were minted.\n' +
+    report.join('\n') +
+    (unmatched.length
+      ? '\n\nNo campaign named "Referral - <name>" exists for: ' + unmatched.join(', ') +
+        '.\nEither their link is under a different name, or they never generated one.'
+      : '') +
+    '\n\nRun syncLinkStats() next to fill in the Link stats tab.');
+
+  return { added: added, skipped: skipped, unmatched: unmatched };
+}
+
+/** Menu handler for seeding, then refreshing the stats tab. */
+function addStartingEntries() {
+  var ui = SpreadsheetApp.getUi();
+  var answer = ui.alert(
+    'Add the starting entries?',
+    SEED_NAMES.join('\n') + '\n\nEach one is attached to the referral link they ' +
+    'already have. No new links are created. Running this twice will not ' +
+    'duplicate them.\n\nContinue?',
+    ui.ButtonSet.YES_NO);
+
+  if (answer !== ui.Button.YES) return;
+
+  try {
+    var r = seedEntries();
+    syncLinkStats();
+    ui.alert('Done',
+      r.added + ' entr' + (r.added === 1 ? 'y' : 'ies') + ' added' +
+      (r.skipped ? ', ' + r.skipped + ' already there' : '') + '.\n\n' +
+      (r.unmatched.length
+        ? 'No existing link found for: ' + r.unmatched.join(', ') +
+          '.\nThey were skipped - see View > Logs for the closest matches.\n\n'
+        : '') +
+      'Link stats has been refreshed. New signups will append below these.',
+      ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Could not add them', String(e && e.message ? e.message : e), ui.ButtonSet.OK);
+  }
+}
+
 /** Menu handler: confirm first, since this clears every entry. */
 function startFresh() {
   var ui = SpreadsheetApp.getUi();
@@ -1135,6 +1279,7 @@ function onOpen() {
     .createMenu('Link Generator')
     .addItem('Refresh stats now', 'refreshNow')
     .addSeparator()
+    .addItem('Add the starting entries', 'addStartingEntries')
     .addItem('Start fresh (clear all entries)', 'startFresh')
     .addToUi();
 }
