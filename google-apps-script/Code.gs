@@ -29,40 +29,89 @@ var HEADERS = [
   'Page'
 ];
 
+/**
+ * Three phases, and only the first holds the lock.
+ *
+ *   1. under the lock  - dedupe on claim id, then reserve a row with the
+ *                        person's details and a blank link
+ *   2. no lock         - mint the Linkrunner link (the slow part, ~1-2s)
+ *   3. no lock         - write the link into the row reserved in phase 1
+ *
+ * The lock is a SCRIPT lock, so it serialises every submission across the
+ * whole web app. Holding it across the Linkrunner call meant one signup at a
+ * time end to end, roughly 30 a minute; everyone past that waited, and
+ * whoever could not get in within the timeout was turned away. Phase 1 is a
+ * few hundred milliseconds, so the serialised section is now a fraction of
+ * the request and throughput rises several-fold.
+ *
+ * Reserving the row before minting also means a signup can no longer be lost
+ * to a Linkrunner outage: the row is already on the sheet, just without a
+ * link, exactly as it would be if minting failed.
+ */
 function doPost(e) {
   var lock = LockService.getScriptLock();
   var locked = false;
-  try {
-    // tryLock, and inside the try, on purpose. waitLock THROWS on timeout, and
-    // a throw from out here hands the browser an HTML error page instead of
-    // JSON. The page cannot read that, so it reports a failure - for a signup
-    // that may well have been written by whichever request held the lock.
-    locked = lock.tryLock(15000);
-    if (!locked) return json_({ ok: false, error: 'busy' });
 
+  try {
     if (!e || !e.postData || !e.postData.contents) {
       return json_({ ok: false, error: 'empty request' });
     }
 
     var data = JSON.parse(e.postData.contents);
-    var sheet = getSheet_();
     var claimId = String(data.claimId || '');
 
-    // Dedupe BEFORE minting. The page re-sends when a reply goes missing, and
-    // minting above this line would spend a second link on that retry and show
-    // the same person a different one each time.
+    /* ---- phase 1: reserve the row -------------------------------------- */
+
+    // tryLock, and inside the try, on purpose. waitLock THROWS on timeout, and
+    // a throw from out here hands the browser an HTML error page instead of
+    // JSON. The page cannot read that, so it reports a failure - for a signup
+    // that may well have been written by whichever request held the lock.
+    //
+    // 45s rather than 15s: with the mint moved out, each turn under the lock
+    // is short, so a longer wait means queueing rather than being refused.
+    locked = lock.tryLock(45000);
+    if (!locked) return json_({ ok: false, error: 'busy' });
+
+    var sheet = getSheet_();
+
+    // Dedupe inside the lock, and write the claim id as part of reserving the
+    // row. Two copies of one submission arriving together cannot both get
+    // past this: whichever takes the lock second finds the first one's row.
     var existing = claimId ? findRow_(sheet, claimId) : 0;
     if (existing) {
-      return json_({
-        ok: true,
-        duplicate: true,
-        link: String(sheet.getRange(existing, HEADERS.indexOf('Referral link') + 1).getValue() || '')
-      });
+      var known = String(sheet.getRange(existing, HEADERS.indexOf('Referral link') + 1).getValue() || '');
+      lock.releaseLock();
+      locked = false;
+      // A blank link here means the first copy is still minting, or its mint
+      // failed. Minting again would spend a second campaign on one person and
+      // show them a different link than the one already being recorded.
+      return json_({ ok: true, duplicate: true, link: known });
     }
 
-    // Minting is wrapped on its own. If Linkrunner is down the signup still has
-    // to land: a row with a blank link can be backfilled, a lost row is someone
-    // who believes they signed up and did not.
+    var row = firstFreeRow_(sheet);
+
+    // Format the phone cell as text BEFORE anything is written to it. Sheets
+    // reads a bare run of digits as a number, and a leading + as the start of a
+    // formula. Setting the format first means digits land exactly as typed.
+    sheet.getRange(row, HEADERS.indexOf('Phone') + 1).setNumberFormat('@');
+
+    sheet.getRange(row, 1, 1, HEADERS.length).setValues([[
+      new Date(),
+      String(data.name || ''),
+      String(data.company || ''),
+      String(data.phone || ''),
+      '',                       // link, filled in by phase 3
+      '',                       // code, likewise
+      String(data.referredBy || ''),
+      claimId,
+      String(data.page || '')
+    ]]);
+
+    lock.releaseLock();
+    locked = false;
+
+    /* ---- phase 2: mint, with no lock held ------------------------------ */
+
     var link = '', code = '', linkError = '';
     try {
       var minted = mintReferralLink_(data);
@@ -78,28 +127,24 @@ function doPost(e) {
       Logger.log('link minting failed: ' + linkError);
     }
 
-    var row = firstFreeRow_(sheet);
+    /* ---- phase 3: fill the link in ------------------------------------- */
 
-    // Format the phone cell as text BEFORE anything is written to it. Sheets
-    // reads a bare run of digits as a number, and a leading + as the start of a
-    // formula. Setting the format first means digits land exactly as typed.
-    sheet.getRange(row, HEADERS.indexOf('Phone') + 1).setNumberFormat('@');
+    if (link) {
+      // Re-find rather than trusting the row number from phase 1: rows can
+      // move if anything was deleted in between, and writing a link onto
+      // someone else's row would be worse than not writing it at all.
+      var target = findRow_(sheet, claimId) || row;
 
-    sheet.getRange(row, 1, 1, HEADERS.length).setValues([[
-      new Date(),
-      String(data.name || ''),
-      String(data.company || ''),
-      String(data.phone || ''),
-      link,
-      code,
-      String(data.referredBy || ''),
-      claimId,
-      String(data.page || '')
-    ]]);
+      // 'Referral link' and 'Referral code' are adjacent, so both go in one
+      // write.
+      sheet.getRange(target, HEADERS.indexOf('Referral link') + 1, 1, 2)
+           .setValues([[link, code]]);
+    }
 
     var reply = { ok: true, link: link };
     if (linkError) reply.linkError = linkError;
     return json_(reply);
+
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   } finally {
@@ -308,20 +353,22 @@ function mintReferralLink_(data) {
 }
 
 /**
- * The person's first name run straight into a two-digit number: "aditi42".
+ * The person's first name run straight into a three-digit number: "aditi426".
  *
- * Two digits is only a hundred codes per name, and custom_display_id has to be
- * unique across the whole Linkrunner account - so two people called Aditi have
- * a real chance of clashing. mintReferralLink_ retries on a clash, and with
- * five attempts the odds of nobody finding a free code are negligible until
- * you have dozens of people sharing a first name.
+ * Three digits, not two. custom_display_id has to be unique across the whole
+ * Linkrunner account, so everyone sharing a first name competes for the same
+ * pool of codes. Two digits is a pool of 100: across a thousand signups a
+ * common first name can easily appear thirty times, and at thirty taken each
+ * attempt has a ~30% chance of clashing - about 1 in 400 people would exhaust
+ * all five attempts and get no link. Three digits makes that pool 1000 and
+ * the failure rate vanishingly small, at the cost of one more character.
  */
 function referralSlug_(name) {
   var first = String(name || '').trim().split(/\s+/)[0] || 'tal';
   first = first.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14) || 'tal';
 
   var digits = '';
-  for (var i = 0; i < 2; i++) digits += Math.floor(Math.random() * 10);
+  for (var i = 0; i < 3; i++) digits += Math.floor(Math.random() * 10);
   return first + digits;
 }
 

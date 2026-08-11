@@ -117,12 +117,16 @@
     // seconds, more when it also has to mint a link. Bound the wait here rather
     // than leaving it to the browser, which on a poor connection hangs far
     // longer than anyone will sit through.
+    //
+    // 60s, above the 45s the script will wait for its lock under load. A
+    // shorter timeout here would abort a request the server is still queueing
+    // and about to answer, turning a slow success into a false failure.
     function post() {
       var opts = postOpts(), timer = null;
       if (typeof AbortController === 'function') {
         var ctrl = new AbortController();
         opts.signal = ctrl.signal;
-        timer = setTimeout(function () { ctrl.abort(); }, 25000);
+        timer = setTimeout(function () { ctrl.abort(); }, 60000);
       }
       function clear() { if (timer) clearTimeout(timer); }
       return fetch(ENDPOINT, opts)
@@ -133,8 +137,35 @@
           // mint, the reason should be one glance away rather than buried in an
           // Apps Script execution log.
           if (r && r.linkError) console.warn('[link-generator] link not minted:', r.linkError);
-          return { ok: !!(r && r.ok), link: (r && r.link) || '' };
+          return {
+            ok: !!(r && r.ok),
+            link: (r && r.link) || '',
+            error: (r && r.error) || ''
+          };
         }, function (e) { clear(); throw e; });
+    }
+
+    function wait(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+
+    /* "busy" means the script could not get its lock in time - everyone is
+       submitting at once. That is the one failure worth retrying on its own,
+       because the request was never processed and nothing was written.
+
+       The jitter matters more than the backoff. A hundred people who all
+       submitted together would otherwise all retry together, collide again,
+       and keep colliding in lockstep. Spreading each retry across a random
+       window breaks that up. */
+    function postRetryingWhenBusy(attempt) {
+      attempt = attempt || 0;
+      return post().then(function (res) {
+        if (res.ok || res.error !== 'busy' || attempt >= 3) return res;
+        var backoff = 1500 * Math.pow(2, attempt);        // 1.5s, 3s, 6s
+        return wait(backoff + Math.random() * 2500).then(function () {
+          return postRetryingWhenBusy(attempt + 1);
+        });
+      });
     }
 
     /* The bit that stops the guessing: ask the sheet whether this submission is
@@ -152,7 +183,7 @@
         .catch(function () { return { state: 'unreadable', link: '' }; });
     }
 
-    return post().catch(function () {
+    return postRetryingWhenBusy().catch(function () {
       return lookUp().then(function (res) {
         if (res.state === 'saved') return { ok: true, link: res.link };
 
@@ -162,7 +193,7 @@
         if (res.state === 'unreadable') return { ok: false, link: '' };
 
         // Genuinely absent: one more try, then look again before giving up.
-        return post().catch(function () {
+        return postRetryingWhenBusy().catch(function () {
           return lookUp().then(function (r2) {
             return { ok: r2.state === 'saved', link: r2.link };
           });
@@ -324,6 +355,11 @@
           showResult('', payload.name);
           el('link').value = '(your link is being prepared, we will send it across)';
           el('copy').classList.add('hidden');
+        } else if (res.error === 'busy') {
+          // Survived every retry, so the queue is genuinely long. Say that
+          // rather than "could not generate", which reads like the details
+          // were rejected - nothing was even processed, let alone lost.
+          showAlert('A lot of people are signing up right now. Give it a few seconds and press the button again.');
         } else {
           showAlert('We could not generate your link just now. Nothing was lost, try again.');
         }
