@@ -346,13 +346,30 @@ function json_(obj) {
 
 var STATS_SHEET_NAME = 'Link stats';
 
+/**
+ * "Sign-ups", not "Installs", and the distinction is not cosmetic.
+ *
+ * Linkrunner's dashboard shows three numbers per campaign - clicks, installs,
+ * sign-ups - and its public Data API exposes only the last one. There are
+ * exactly three endpoints (/campaigns, /attributed-users,
+ * /get-attribution-result) and none of them carries a click or install count.
+ *
+ * An "attributed user" only comes into existence once the app reports a
+ * signup, so someone who installs and never signs up is invisible here. A
+ * campaign reading 2 installs / 1 sign-up on the dashboard can therefore only
+ * ever be fetched as 1. Labelling that column "Installs" is what made the tab
+ * look broken when it was in fact reporting the only number available.
+ *
+ * For paying out this programme, sign-ups is arguably the number that matters
+ * anyway: an install that never signs up is not an eligible boss.
+ */
 var STATS_HEADERS = [
   'Referral code',
   'Name',
   'Company',
   'Phone',
   'Referral link',
-  'Installs',
+  'Sign-ups',
   'Active',
   'Link created',
   'Signed up at',
@@ -663,22 +680,19 @@ function diagnoseStats() {
     out.push('READ: matching works and real install counts are coming through.');
     out.push('Run syncLinkStats() and the tab should agree with this.');
   } else if (matched) {
-    out.push('READ: all ' + matched + ' referral campaigns were found, and Linkrunner');
-    out.push('itself reports attributed_users = 0 for every one of them. The tab');
-    out.push('is showing exactly what the API returns, so the zeros are not a bug.');
+    out.push('READ: all ' + matched + ' referral campaigns were found, and the campaigns');
+    out.push('list reports attributed_users = 0 for every one of them.');
     out.push('');
-    out.push('attributed_users counts APP INSTALLS attributed through the');
-    out.push('Linkrunner SDK - someone tapping the link, installing the app, and');
-    out.push('the SDK tying that install back to the campaign. Link CLICKS are a');
-    out.push('separate number, and their public API does not expose clicks at');
-    out.push('all, so a dashboard figure showing clicks or visits can never');
-    out.push('agree with this column.');
-    if (total > 0) {
-      out.push('');
-      out.push('Note: ' + total + ' install(s) do exist on this account, just on');
-      out.push('campaigns other than these ' + matched + '. So attribution itself is');
-      out.push('working - it is these referral links that have no installs yet.');
-    }
+    out.push('That field lags and cannot be trusted on its own - it has read 0');
+    out.push('for campaigns that had real activity. The tab does not use it; it');
+    out.push('reads /attributed-users per campaign instead. Run syncLinkStats()');
+    out.push('and then inspectCampaign(<code>) on a campaign you know has');
+    out.push('activity to see both numbers side by side.');
+    out.push('');
+    out.push('Also worth knowing: the column counts SIGN-UPS, the only one of');
+    out.push('the dashboard\'s three numbers the API exposes. Clicks and');
+    out.push('installs are not available from any endpoint, so a link showing');
+    out.push('2 installs and 1 sign-up can only ever be fetched as 1.');
   } else {
     out.push('READ: no referral codes on the sheet to check yet.');
   }
@@ -758,12 +772,24 @@ function inspectCampaign(code) {
   var listNum = Number(c.attributed_users || 0);
   var realNum = pg ? Number(pg.total || 0) : null;
   if (realNum !== null && realNum !== listNum) {
-    out.push('READ: the two sources disagree - list says ' + listNum +
-             ', /attributed-users says ' + realNum + '.');
-    out.push('The tab now uses /attributed-users, so it will show ' + realNum + '.');
-  } else if (realNum !== null) {
-    out.push('READ: both sources agree on ' + realNum + '.');
+    out.push('The two API sources disagree - the campaigns list says ' + listNum +
+             ', /attributed-users says ' + realNum + '. The tab uses');
+    out.push('/attributed-users, so it shows ' + realNum + '. The list field lags.');
+    out.push('');
   }
+
+  out.push('READ: ' + (realNum === null ? '?' : realNum) + ' is the SIGN-UP count, and it is the only');
+  out.push('one of the dashboard\'s three numbers the API exposes.');
+  out.push('');
+  out.push('  Clicks    - not in the API at all');
+  out.push('  Installs  - not in the API at all');
+  out.push('  Sign-ups  - this number, via /attributed-users');
+  out.push('');
+  out.push('There are exactly three Data API endpoints and none returns a click');
+  out.push('or install count. An attributed user only exists once the app');
+  out.push('reports a signup, so someone who installs and never signs up cannot');
+  out.push('be counted here. If the dashboard shows 2 installs and 1 sign-up,');
+  out.push('this will read 1 - that is the ceiling, not a bug.');
 
   Logger.log(out.join('\n'));
 }
