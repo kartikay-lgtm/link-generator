@@ -370,10 +370,16 @@ var STATS_HEADERS = [
 
 /** Rebuilds the Link stats tab. Safe to run as often as you like. */
 function syncLinkStats() {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) return;   // a sync is already running
-
-  try {
+  // No lock around the slow part, deliberately.
+  //
+  // This used to hold the SCRIPT lock for the whole function, and
+  // fetchReportingCampaigns_ sleeps ~60s between pages to respect the
+  // Reporting API's one-request-per-minute limit. doPost waits only 15s for
+  // that same lock, so every signup submitted during a sync was answered
+  // "busy" - roughly a 60-second dead window every 5 minutes, at zero
+  // traffic. Reading the sheet and calling Linkrunner need no lock; only the
+  // write does, and that is now the only thing holding one.
+  {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var signups = ss.getSheetByName(SHEET_NAME);
     if (!signups || signups.getLastRow() < 2) return;
@@ -451,9 +457,15 @@ function syncLinkStats() {
              ((Number(b[6]) || 0) - (Number(a[6]) || 0));
     });
 
-    writeStats_(ss, out);
-  } finally {
-    lock.releaseLock();
+    // Lock only the write. Sub-second, so a signup arriving mid-sync waits
+    // milliseconds rather than being turned away.
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(30000)) return;   // another sync is mid-write
+    try {
+      writeStats_(ss, out);
+    } finally {
+      lock.releaseLock();
+    }
   }
 }
 
