@@ -918,22 +918,56 @@ function inspectCampaign(code) {
 }
 
 /** Replaces the tab's contents, creating it and its header row if needed. */
+/**
+ * How each column should be formatted, keyed by header name.
+ *
+ * Keyed by NAME rather than position on purpose. Adding the Clicks and
+ * Installs columns shifted everything after them right, and a positional map
+ * would have silently pointed at the wrong columns again.
+ */
+var STATS_FORMATS = {
+  'Referral code': '@',
+  'Name':          '@',
+  'Company':       '@',
+  'Phone':         '@',
+  'Referral link': '@',
+  'Clicks':        '0',
+  'Installs':      '0',
+  'Sign-ups':      '0',
+  'Active':        '@',
+  'Link created':  'dd mmm yyyy',
+  'Signed up at':  'dd mmm yyyy',
+  'Last synced':   'dd mmm yyyy hh:mm'
+};
+
+/** Replaces the tab's contents, creating it and its header row if needed. */
 function writeStats_(ss, rows) {
   var sheet = ss.getSheetByName(STATS_SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(STATS_SHEET_NAME);
 
   sheet.clearContents();
+
+  // clearContents wipes values and leaves FORMATS in place. That is what
+  // turned Sign-ups into dates: the column previously held "Link created", so
+  // it kept that date format, and Sheets renders 1 as 31/12/1899 and 0 as
+  // 30/12/1899 - the first two days of its epoch. Formats are therefore
+  // reasserted on every run rather than inherited from whatever the column
+  // used to be.
+  var depth = Math.max(rows.length, 1);
+  for (var i = 0; i < STATS_HEADERS.length; i++) {
+    var f = STATS_FORMATS[STATS_HEADERS[i]];
+    if (f) sheet.getRange(2, i + 1, depth, 1).setNumberFormat(f);
+  }
+
   sheet.getRange(1, 1, 1, STATS_HEADERS.length).setValues([STATS_HEADERS]).setFontWeight('bold');
   sheet.setFrozenRows(1);
 
   if (rows.length) {
-    // Phone as text before writing, same reason as the Signups tab.
-    sheet.getRange(2, 4, rows.length, 1).setNumberFormat('@');
     sheet.getRange(2, 1, rows.length, STATS_HEADERS.length).setValues(rows);
   }
 
-  sheet.setColumnWidth(5, 280);
-  sheet.setColumnWidth(2, 160);
+  sheet.setColumnWidth(STATS_HEADERS.indexOf('Referral link') + 1, 280);
+  sheet.setColumnWidth(STATS_HEADERS.indexOf('Name') + 1, 160);
 }
 
 /** Adds a "Link Generator" menu whenever the spreadsheet is opened. */
