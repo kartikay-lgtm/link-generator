@@ -1218,9 +1218,30 @@ function seedEntries() {
   return { added: added, skipped: skipped, unmatched: unmatched };
 }
 
+/**
+ * The spreadsheet's UI, or null when there isn't one.
+ *
+ * SpreadsheetApp.getUi() throws outright when a function is run from the
+ * Apps Script editor rather than from the sheet's own menu - there is no
+ * spreadsheet window attached to talk to. These functions are useful from
+ * both places, so each one asks for the UI and carries on without it.
+ */
+function ui_() {
+  try { return SpreadsheetApp.getUi(); } catch (e) { return null; }
+}
+
 /** Menu handler for seeding, then refreshing the stats tab. */
 function addStartingEntries() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = ui_();
+
+  // From the editor: no dialogs to show, so just do the work and log it.
+  if (!ui) {
+    var res = seedEntries();
+    syncLinkStats();
+    Logger.log('Link stats refreshed. New signups will append below these.');
+    return res;
+  }
+
   var answer = ui.alert(
     'Add the starting entries?',
     SEED_NAMES.join('\n') + '\n\nEach one is attached to the referral link they ' +
@@ -1249,7 +1270,16 @@ function addStartingEntries() {
 
 /** Menu handler: confirm first, since this clears every entry. */
 function startFresh() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = ui_();
+
+  // From the editor there is no dialog to confirm with. Running it by name is
+  // deliberate enough on its own, and resetSheets archives before it clears,
+  // so nothing is lost either way.
+  if (!ui) {
+    var res = resetSheets();
+    return res;
+  }
+
   var answer = ui.alert(
     'Start fresh?',
     'This clears every signup and the whole stats tab.\n\n' +
@@ -1286,12 +1316,15 @@ function onOpen() {
 
 /** Menu handler: sync, then say so, so a click never feels like nothing. */
 function refreshNow() {
-  var ui = SpreadsheetApp.getUi();
+  var ui = ui_();
   try {
     syncLinkStats();
-    SpreadsheetApp.getActiveSpreadsheet().toast('Link stats updated.', 'Link Generator', 5);
+    Logger.log('Link stats updated.');
+    if (ui) SpreadsheetApp.getActiveSpreadsheet().toast('Link stats updated.', 'Link Generator', 5);
   } catch (err) {
-    ui.alert('Could not refresh', String(err), ui.ButtonSet.OK);
+    Logger.log('Could not refresh: ' + err);
+    if (ui) ui.alert('Could not refresh', String(err), ui.ButtonSet.OK);
+    else throw err;    // from the editor, surface it as a real failure
   }
 }
 
