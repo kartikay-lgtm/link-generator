@@ -390,7 +390,10 @@ function syncLinkStats() {
     var now = new Date();
 
     var out = people.map(function (p) {
-      var c = campaigns[p.code] || null;
+      // Match on the normalised code, then fall back to the code inside the
+      // link we actually handed this person.
+      var c = campaigns[normaliseCode_(p.code)] ||
+              campaigns[codeFromLink_(p.link)] || null;
       return [
         p.code, p.name, p.company, p.phone, p.link,
         c ? Number(c.attributed_users || 0) : '',
@@ -410,7 +413,32 @@ function syncLinkStats() {
   }
 }
 
-/** Every campaign in the project, keyed by display_id. Follows pagination. */
+/**
+ * The code as used for lookups: lowercased and trimmed.
+ *
+ * Our slugs are minted lowercase ("megh41"), but a display_id is only ever
+ * echoed back by Linkrunner, not guaranteed to come back in the same case.
+ * Comparing raw strings makes a single case difference look exactly like a
+ * campaign that does not exist, which reads on the tab as "not found".
+ */
+function normaliseCode_(v) {
+  return String(v == null ? '' : v).trim().toLowerCase();
+}
+
+/** The ?c=CODE part of a campaign link, or '' if there isn't one. */
+function codeFromLink_(link) {
+  var m = /[?&]c=([^&#]+)/.exec(String(link || ''));
+  return m ? normaliseCode_(decodeURIComponent(m[1])) : '';
+}
+
+/**
+ * Every campaign in the project, keyed by display_id (lowercased). Follows
+ * pagination.
+ *
+ * Also keyed by the code embedded in the campaign's own link, so a campaign
+ * still resolves if Linkrunner ever reports a display_id that differs from
+ * the code sitting in the link we handed out.
+ */
 function fetchAllCampaigns_() {
   var key = PropertiesService.getScriptProperties().getProperty('LINKRUNNER_API_KEY');
   if (!key) throw new Error('LINKRUNNER_API_KEY is not set in Script Properties');
@@ -432,13 +460,109 @@ function fetchAllCampaigns_() {
     var parsed = JSON.parse(body);
     var data = parsed && parsed.data;
     var list = (data && data.campaigns) || [];
-    for (var i = 0; i < list.length; i++) byId[String(list[i].display_id)] = list[i];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var id = normaliseCode_(c.display_id);
+      if (id) byId[id] = c;
+
+      // Secondary key. Never allowed to clobber a real display_id match.
+      var viaLink = codeFromLink_(c.link || c.shareable_link);
+      if (viaLink && !byId[viaLink]) byId[viaLink] = c;
+    }
 
     var pg = data && data.pagination;
     if (!pg || !pg.pages || page >= pg.pages) break;
     page++;
   }
   return byId;
+}
+
+/**
+ * Run this from the editor when the Installs column looks wrong. It answers
+ * the one question that matters: are we failing to FIND the campaigns, or
+ * finding them and being told the count is zero?
+ *
+ * Those two have completely different fixes, and the tab alone cannot tell
+ * them apart. Nothing here prints the API key.
+ */
+function diagnoseStats() {
+  var out = [];
+
+  var campaigns = fetchAllCampaigns_();
+  var ids = Object.keys(campaigns);
+
+  // Distinct objects, since each campaign is indexed under up to two keys.
+  var seen = [], total = 0;
+  ids.forEach(function (k) {
+    if (seen.indexOf(campaigns[k]) === -1) {
+      seen.push(campaigns[k]);
+      total += Number(campaigns[k].attributed_users || 0);
+    }
+  });
+
+  out.push('Campaigns returned by Linkrunner: ' + seen.length);
+  out.push('Sum of attributed_users across ALL of them: ' + total);
+  out.push('');
+  out.push('First few, exactly as Linkrunner reports them:');
+  seen.slice(0, 8).forEach(function (c) {
+    out.push('   display_id=' + c.display_id +
+             '  attributed_users=' + c.attributed_users +
+             '  active=' + c.active +
+             '  link=' + (c.link || ''));
+  });
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    out.push('');
+    out.push('No signups on the ' + SHEET_NAME + ' tab yet.');
+    Logger.log(out.join('\n'));
+    return;
+  }
+
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length).getValues();
+  var codeCol = HEADERS.indexOf('Referral code');
+  var linkCol = HEADERS.indexOf('Referral link');
+
+  var matched = 0, unmatched = [], nonzero = 0;
+  rows.forEach(function (r) {
+    var code = String(r[codeCol] || '').trim();
+    if (!code) return;
+    var c = campaigns[normaliseCode_(code)] || campaigns[codeFromLink_(r[linkCol])] || null;
+    if (c) {
+      matched++;
+      if (Number(c.attributed_users || 0) > 0) nonzero++;
+    } else {
+      unmatched.push(code);
+    }
+  });
+
+  out.push('');
+  out.push('Sheet codes matched to a campaign: ' + matched);
+  out.push('Of those, with installs above zero: ' + nonzero);
+  out.push('Sheet codes with NO matching campaign: ' + unmatched.length +
+           (unmatched.length ? '  -> ' + unmatched.slice(0, 15).join(', ') : ''));
+
+  out.push('');
+  if (unmatched.length && !matched) {
+    out.push('READ: nothing matched. The codes on the sheet do not correspond to');
+    out.push('any campaign on this Linkrunner account - most likely the key here');
+    out.push('belongs to a different Linkrunner project than the dashboard you');
+    out.push('are looking at.');
+  } else if (matched && !nonzero && total === 0) {
+    out.push('READ: the campaigns were all found, and Linkrunner itself reports');
+    out.push('attributed_users = 0 for every one of them. The sheet is showing');
+    out.push('exactly what the API returns, so the zeros are not a bug here.');
+    out.push('attributed_users counts APP INSTALLS attributed through the');
+    out.push('Linkrunner SDK. Link clicks are a different number, and their');
+    out.push('public API does not expose clicks at all - so if the dashboard');
+    out.push('figure you are comparing against is clicks or visits, it will');
+    out.push('never match this column.');
+  } else if (matched && nonzero) {
+    out.push('READ: matching works and real install counts are coming through.');
+    out.push('Run syncLinkStats() and the tab should agree with this.');
+  }
+
+  Logger.log(out.join('\n'));
 }
 
 /** Replaces the tab's contents, creating it and its header row if needed. */
