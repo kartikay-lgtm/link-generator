@@ -347,21 +347,11 @@ function json_(obj) {
 var STATS_SHEET_NAME = 'Link stats';
 
 /**
- * "Sign-ups", not "Installs", and the distinction is not cosmetic.
- *
- * Linkrunner's dashboard shows three numbers per campaign - clicks, installs,
- * sign-ups - and its public Data API exposes only the last one. There are
- * exactly three endpoints (/campaigns, /attributed-users,
- * /get-attribution-result) and none of them carries a click or install count.
- *
- * An "attributed user" only comes into existence once the app reports a
- * signup, so someone who installs and never signs up is invisible here. A
- * campaign reading 2 installs / 1 sign-up on the dashboard can therefore only
- * ever be fetched as 1. Labelling that column "Installs" is what made the tab
- * look broken when it was in fact reporting the only number available.
- *
- * For paying out this programme, sign-ups is arguably the number that matters
- * anyway: an install that never signs up is not an eligible boss.
+ * All three of the dashboard's numbers, because the Reporting API returns all
+ * three. Sign-ups is kept alongside installs rather than replacing it: an
+ * install that never signs up is not an eligible boss, so sign-ups is the
+ * number this programme pays on, while clicks and installs show how far up
+ * the funnel a referrer is getting.
  */
 var STATS_HEADERS = [
   'Referral code',
@@ -369,6 +359,8 @@ var STATS_HEADERS = [
   'Company',
   'Phone',
   'Referral link',
+  'Clicks',
+  'Installs',
   'Sign-ups',
   'Active',
   'Link created',
@@ -403,32 +395,48 @@ function syncLinkStats() {
     }
     if (!people.length) return;
 
-    var campaigns = fetchAllCampaigns_();   // display_id -> campaign
     var now = new Date();
 
-    // Resolve each person to their campaign first, so the install lookup can
-    // use the display_id exactly as Linkrunner spells it.
+    // The Reporting API is the source of truth - it is what the dashboard
+    // table is built from. Everything else here is a fallback for when it is
+    // unreachable, so that an outage degrades the tab rather than emptying it.
+    var reporting = null, reportingError = '';
+    try {
+      reporting = fetchReportingCampaigns_();
+    } catch (e) {
+      reportingError = String(e && e.message ? e.message : e);
+      Logger.log('reporting fetch failed, falling back: ' + reportingError);
+    }
+
+    var campaigns = fetchAllCampaigns_();   // display_id -> campaign
+
     people.forEach(function (p) {
       p.campaign = campaigns[normaliseCode_(p.code)] ||
                    campaigns[codeFromLink_(p.link)] || null;
+      p.report = reporting ? (reporting[normaliseCode_(p.code)] ||
+                              reporting[codeFromLink_(p.link)] || null) : null;
       p.lookupId = p.campaign ? String(p.campaign.display_id) : p.code;
     });
 
-    var counts = fetchInstallCounts_(people.map(function (p) { return p.lookupId; }));
+    // Only pay for the per-campaign signup lookup when reporting is missing;
+    // it is one request per campaign and reporting already carries sign-ups.
+    var counts = reporting
+      ? {}
+      : fetchInstallCounts_(people.map(function (p) { return p.lookupId; }));
 
     var out = people.map(function (p) {
-      var c = p.campaign;
+      var c = p.campaign, r = p.report;
       var n = counts[p.lookupId];
 
-      // Fall back to the list field only when the per-campaign lookup failed
-      // outright. It under-reports, so it is a last resort rather than the
-      // source of truth.
-      var installs = (typeof n === 'number') ? n
-                   : (c ? Number(c.attributed_users || 0) : '');
+      var signups = r ? r.signups
+                  : (typeof n === 'number') ? n
+                  : (c ? Number(c.attributed_users || 0) : '');
 
       return [
         p.code, p.name, p.company, p.phone, p.link,
-        installs,
+        r ? r.clicks : '',
+        r ? r.installs : '',
+        signups,
         c ? (c.active ? 'yes' : 'no') : 'not found',
         c && c.created_at ? new Date(c.created_at) : '',
         p.signedUpAt,
@@ -436,13 +444,118 @@ function syncLinkStats() {
       ];
     });
 
-    // Most installs first: this tab exists to answer "who gets a bonus".
-    out.sort(function (a, b) { return (Number(b[5]) || 0) - (Number(a[5]) || 0); });
+    // Sign-ups first, installs to break ties: this tab exists to answer "who
+    // gets a bonus", and the programme pays on approved bosses, not installs.
+    out.sort(function (a, b) {
+      return ((Number(b[7]) || 0) - (Number(a[7]) || 0)) ||
+             ((Number(b[6]) || 0) - (Number(a[6]) || 0));
+    });
 
     writeStats_(ss, out);
   } finally {
     lock.releaseLock();
   }
+}
+
+var REPORTING_URL = 'https://api.linkrunner.io/api/v1/reporting/campaigns';
+
+/**
+ * Reporting API numbers arrive as display strings - "3,201", "$12,540.50",
+ * "95.38%" - so they have to be stripped before any arithmetic. Sorting on
+ * the raw strings would order them alphabetically, putting "9" above "1,200".
+ */
+function reportingNumber_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  var n = Number(String(v).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? '' : n;
+}
+
+/**
+ * Clicks, installs and sign-ups per campaign, from the Reporting API.
+ *
+ * This is the endpoint behind the dashboard's campaign table, so its numbers
+ * are the ones on screen. The Data API endpoints cannot substitute for it:
+ * /campaigns carries a lagging attributed_users field and /attributed-users
+ * counts only users who reached signup.
+ *
+ * Rate limit is 1 request PER MINUTE per API key - not the 30/sec that
+ * applies per IP across the other endpoints. With max limit=100, an account
+ * past 100 campaigns needs a second page, and asking for it immediately earns
+ * a 429. Hence the deliberate wait between pages, and honouring Retry-After
+ * when one comes back anyway.
+ *
+ * Omits from/to on purpose: those set the metrics window, and leaving them
+ * off gives the lifetime totals a referral programme should be paid on.
+ *
+ * Returns { code: {clicks, installs, signups, ...} }.
+ */
+function fetchReportingCampaigns_() {
+  var key = PropertiesService.getScriptProperties().getProperty('LINKRUNNER_API_KEY');
+  if (!key) throw new Error('LINKRUNNER_API_KEY is not set in Script Properties');
+
+  var byId = {};
+  var page = 1, pages = 1, fetched = 0;
+
+  for (var guard = 0; guard < 12 && page <= pages; guard++) {
+    if (fetched > 0) Utilities.sleep(61000);   // 1 req/min per key
+
+    var url = REPORTING_URL + '?limit=100&page=' + page +
+              '&sort_field=installs&sort_order=descending';
+
+    var res = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { 'linkrunner-key': key },
+      muteHttpExceptions: true
+    });
+
+    var status = res.getResponseCode();
+    var body = res.getContentText();
+
+    if (status === 429) {
+      var hdrs = res.getHeaders() || {};
+      var wait = Number(hdrs['Retry-After'] || hdrs['retry-after'] || 60);
+      if (!wait || isNaN(wait)) wait = 60;
+      Utilities.sleep((wait + 2) * 1000);
+      fetched = 0;          // the wait above already covers the next call
+      continue;             // retry this same page; guard bounds the loop
+    }
+    if (status < 200 || status >= 300) {
+      throw new Error('Linkrunner reporting ' + status + ': ' + body.slice(0, 300));
+    }
+
+    fetched++;
+
+    var parsed = JSON.parse(body);
+    var data = parsed && parsed.data;
+    var list = (data && data.campaigns) || [];
+
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var rec = {
+        display_id: c.display_id,
+        clicks:   reportingNumber_(c.clicks),
+        installs: reportingNumber_(c.installs),
+        // Hyphenated key, not sign_ups or signups. Reading the wrong spelling
+        // yields undefined, which formats as a blank cell rather than an error.
+        signups:  reportingNumber_(c['sign-ups']),
+        active:   c.active,
+        created_at: c.created_at,
+        link: c.link
+      };
+
+      var id = normaliseCode_(c.display_id);
+      if (id) byId[id] = rec;
+
+      var viaLink = codeFromLink_(c.link);
+      if (viaLink && !byId[viaLink]) byId[viaLink] = rec;
+    }
+
+    var pg = data && data.pagination;
+    pages = (pg && Number(pg.pages)) || 1;
+    page++;
+  }
+
+  return byId;
 }
 
 /**
@@ -683,16 +796,11 @@ function diagnoseStats() {
     out.push('READ: all ' + matched + ' referral campaigns were found, and the campaigns');
     out.push('list reports attributed_users = 0 for every one of them.');
     out.push('');
-    out.push('That field lags and cannot be trusted on its own - it has read 0');
-    out.push('for campaigns that had real activity. The tab does not use it; it');
-    out.push('reads /attributed-users per campaign instead. Run syncLinkStats()');
-    out.push('and then inspectCampaign(<code>) on a campaign you know has');
-    out.push('activity to see both numbers side by side.');
-    out.push('');
-    out.push('Also worth knowing: the column counts SIGN-UPS, the only one of');
-    out.push('the dashboard\'s three numbers the API exposes. Clicks and');
-    out.push('installs are not available from any endpoint, so a link showing');
-    out.push('2 installs and 1 sign-up can only ever be fetched as 1.');
+    out.push('That field lags badly and the tab does not use it. Clicks,');
+    out.push('installs and sign-ups all come from the Reporting API');
+    out.push('(/reporting/campaigns), which is what the dashboard table is');
+    out.push('built from. Run syncLinkStats(), then inspectCampaign(<code>) on');
+    out.push('a link you know has activity to see every source side by side.');
   } else {
     out.push('READ: no referral codes on the sheet to check yet.');
   }
@@ -771,25 +879,40 @@ function inspectCampaign(code) {
   out.push('');
   var listNum = Number(c.attributed_users || 0);
   var realNum = pg ? Number(pg.total || 0) : null;
-  if (realNum !== null && realNum !== listNum) {
-    out.push('The two API sources disagree - the campaigns list says ' + listNum +
-             ', /attributed-users says ' + realNum + '. The tab uses');
-    out.push('/attributed-users, so it shows ' + realNum + '. The list field lags.');
-    out.push('');
+
+  // The number that matters: the Reporting API is what the dashboard table is
+  // built from, so this is the row you are comparing against on screen.
+  var report = null, reportErr = '';
+  try {
+    var all = fetchReportingCampaigns_();
+    report = all[normaliseCode_(c.display_id)] || all[normaliseCode_(code)] || null;
+  } catch (e) {
+    reportErr = String(e && e.message ? e.message : e);
   }
 
-  out.push('READ: ' + (realNum === null ? '?' : realNum) + ' is the SIGN-UP count, and it is the only');
-  out.push('one of the dashboard\'s three numbers the API exposes.');
+  out.push('=== Reporting API (what the dashboard shows) ===');
+  if (report) {
+    out.push('   Clicks:   ' + report.clicks);
+    out.push('   Installs: ' + report.installs);
+    out.push('   Sign-ups: ' + report.signups);
+  } else {
+    out.push('   unavailable' + (reportErr ? ': ' + reportErr : ' - campaign not in the reporting response'));
+  }
+
   out.push('');
-  out.push('  Clicks    - not in the API at all');
-  out.push('  Installs  - not in the API at all');
-  out.push('  Sign-ups  - this number, via /attributed-users');
+  out.push('=== Data API, for comparison ===');
+  out.push('   /campaigns attributed_users: ' + listNum + '   (lags; not used)');
+  out.push('   /attributed-users total:     ' + (realNum === null ? '?' : realNum) +
+           '   (sign-ups only; fallback)');
+
   out.push('');
-  out.push('There are exactly three Data API endpoints and none returns a click');
-  out.push('or install count. An attributed user only exists once the app');
-  out.push('reports a signup, so someone who installs and never signs up cannot');
-  out.push('be counted here. If the dashboard shows 2 installs and 1 sign-up,');
-  out.push('this will read 1 - that is the ceiling, not a bug.');
+  if (report) {
+    out.push('READ: the tab takes Clicks/Installs/Sign-ups from the Reporting');
+    out.push('API, so those three should now match the dashboard row exactly.');
+  } else {
+    out.push('READ: the Reporting API did not return this campaign, so the tab');
+    out.push('falls back to sign-ups only and leaves clicks/installs blank.');
+  }
 
   Logger.log(out.join('\n'));
 }
