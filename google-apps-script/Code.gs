@@ -389,14 +389,29 @@ function syncLinkStats() {
     var campaigns = fetchAllCampaigns_();   // display_id -> campaign
     var now = new Date();
 
+    // Resolve each person to their campaign first, so the install lookup can
+    // use the display_id exactly as Linkrunner spells it.
+    people.forEach(function (p) {
+      p.campaign = campaigns[normaliseCode_(p.code)] ||
+                   campaigns[codeFromLink_(p.link)] || null;
+      p.lookupId = p.campaign ? String(p.campaign.display_id) : p.code;
+    });
+
+    var counts = fetchInstallCounts_(people.map(function (p) { return p.lookupId; }));
+
     var out = people.map(function (p) {
-      // Match on the normalised code, then fall back to the code inside the
-      // link we actually handed this person.
-      var c = campaigns[normaliseCode_(p.code)] ||
-              campaigns[codeFromLink_(p.link)] || null;
+      var c = p.campaign;
+      var n = counts[p.lookupId];
+
+      // Fall back to the list field only when the per-campaign lookup failed
+      // outright. It under-reports, so it is a last resort rather than the
+      // source of truth.
+      var installs = (typeof n === 'number') ? n
+                   : (c ? Number(c.attributed_users || 0) : '');
+
       return [
         p.code, p.name, p.company, p.phone, p.link,
-        c ? Number(c.attributed_users || 0) : '',
+        installs,
         c ? (c.active ? 'yes' : 'no') : 'not found',
         c && c.created_at ? new Date(c.created_at) : '',
         p.signedUpAt,
@@ -411,6 +426,72 @@ function syncLinkStats() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * The real install count per campaign, from GET /attributed-users.
+ *
+ * NOT the attributed_users field on the campaigns list. That field reported 0
+ * for campaigns the dashboard showed installs against, so it is not the
+ * number anyone means by "installs". This endpoint returns the actual
+ * attributed-user records, and pagination.total is the true count - so we ask
+ * for a single row and read the total off the pagination block rather than
+ * pulling every user record back.
+ *
+ * Returns { code: count }, with null for any campaign whose lookup failed, so
+ * a failed call stays distinguishable from a genuine zero.
+ */
+function fetchInstallCounts_(ids) {
+  var key = PropertiesService.getScriptProperties().getProperty('LINKRUNNER_API_KEY');
+  if (!key) throw new Error('LINKRUNNER_API_KEY is not set in Script Properties');
+
+  var out = {};
+  // fetchAll runs a batch concurrently - one request per campaign in series
+  // would be slow enough to risk the Apps Script execution limit once this
+  // grows to a few hundred referrers. Chunked to stay under their documented
+  // 30 requests/second.
+  var CHUNK = 25;
+
+  for (var i = 0; i < ids.length; i += CHUNK) {
+    var slice = ids.slice(i, i + CHUNK);
+    var reqs = slice.map(function (id) {
+      return {
+        url: 'https://api.linkrunner.io/api/v1/attributed-users?limit=1&display_id=' +
+             encodeURIComponent(id),
+        method: 'get',
+        headers: { 'linkrunner-key': key },
+        muteHttpExceptions: true
+      };
+    });
+
+    var responses;
+    try {
+      responses = UrlFetchApp.fetchAll(reqs);
+    } catch (e) {
+      slice.forEach(function (id) { out[id] = null; });
+      continue;
+    }
+
+    for (var j = 0; j < responses.length; j++) {
+      var id = slice[j];
+      try {
+        var status = responses[j].getResponseCode();
+        if (status < 200 || status >= 300) { out[id] = null; continue; }
+
+        var parsed = JSON.parse(responses[j].getContentText());
+        var data = parsed && parsed.data;
+        var pg = data && data.pagination;
+
+        // pagination.total is the count of ALL attributed users. total_users
+        // is only how many came back on this page, which with limit=1 is 1 -
+        // reading that instead would report 1 for everyone.
+        out[id] = (pg && typeof pg.total === 'number') ? pg.total : null;
+      } catch (e) {
+        out[id] = null;
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -600,6 +681,88 @@ function diagnoseStats() {
     }
   } else {
     out.push('READ: no referral codes on the sheet to check yet.');
+  }
+
+  Logger.log(out.join('\n'));
+}
+
+/**
+ * Everything Linkrunner knows about one referral code, both numbers side by
+ * side. Run it from the editor after editing the code below, or as
+ * inspectCampaign('anubhav85').
+ *
+ * Exists because the two sources disagree: the campaigns list reported
+ * attributed_users = 0 for links the dashboard showed installs against. This
+ * prints both so the gap is visible rather than inferred.
+ */
+function inspectCampaign(code) {
+  code = code || 'anubhav85';
+  var out = [];
+  var norm = normaliseCode_(code);
+
+  var campaigns = fetchAllCampaigns_();
+  var c = campaigns[norm] || null;
+
+  out.push('Looking up: ' + code);
+  out.push('');
+
+  if (!c) {
+    out.push('Not present in the campaigns list at all.');
+    Logger.log(out.join('\n'));
+    return;
+  }
+
+  out.push('display_id as Linkrunner spells it: ' + c.display_id);
+  out.push('attributed_users on the LIST endpoint: ' + c.attributed_users);
+  out.push('');
+  out.push('Full campaign object:');
+  out.push('   ' + JSON.stringify(c));
+  out.push('');
+
+  var key = PropertiesService.getScriptProperties().getProperty('LINKRUNNER_API_KEY');
+  var res = UrlFetchApp.fetch(
+    'https://api.linkrunner.io/api/v1/attributed-users?limit=5&display_id=' +
+    encodeURIComponent(c.display_id),
+    { method: 'get', headers: { 'linkrunner-key': key }, muteHttpExceptions: true });
+
+  var status = res.getResponseCode();
+  out.push('GET /attributed-users -> HTTP ' + status);
+
+  if (status < 200 || status >= 300) {
+    out.push('Body: ' + res.getContentText().slice(0, 500));
+    Logger.log(out.join('\n'));
+    return;
+  }
+
+  var parsed = JSON.parse(res.getContentText());
+  var data = parsed && parsed.data;
+  var pg = data && data.pagination;
+
+  out.push('msg: ' + parsed.msg);
+  out.push('pagination.total (the real install count): ' + (pg ? pg.total : 'absent'));
+  out.push('');
+
+  var users = (data && data.users) || [];
+  if (users.length) {
+    out.push('Attributed users, most recent first:');
+    users.forEach(function (u) {
+      out.push('   installed_at=' + u.installed_at +
+               '  attributed_at=' + u.attributed_at +
+               '  channel=' + u.ad_channel);
+    });
+  } else {
+    out.push('No attributed-user records returned.');
+  }
+
+  out.push('');
+  var listNum = Number(c.attributed_users || 0);
+  var realNum = pg ? Number(pg.total || 0) : null;
+  if (realNum !== null && realNum !== listNum) {
+    out.push('READ: the two sources disagree - list says ' + listNum +
+             ', /attributed-users says ' + realNum + '.');
+    out.push('The tab now uses /attributed-users, so it will show ' + realNum + '.');
+  } else if (realNum !== null) {
+    out.push('READ: both sources agree on ' + realNum + '.');
   }
 
   Logger.log(out.join('\n'));
