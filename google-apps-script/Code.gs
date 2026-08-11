@@ -256,6 +256,15 @@ function tidyBlankRows() {
 
 /** Row number for an existing claim id, or 0 if it has not been seen. */
 function findRow_(sheet, claimId) {
+  // An empty id must never match. Without this, the comparison below finds
+  // the first row whose Claim ID cell happens to be blank - and the caller
+  // then writes a link onto that unrelated row, overwriting whatever was
+  // there. Any submission arriving without a claim id (a stale cached page,
+  // a direct API call, a row backfilled by hand) could clobber an existing
+  // entry this way.
+  claimId = String(claimId == null ? '' : claimId);
+  if (!claimId) return 0;
+
   var last = sheet.getLastRow();
   if (last < 2) return 0;
 
@@ -1029,11 +1038,104 @@ function writeStats_(ss, rows) {
   sheet.setColumnWidth(STATS_HEADERS.indexOf('Name') + 1, 160);
 }
 
+/**
+ * Empties both tabs so the next signup lands in row 2.
+ *
+ * Everything currently on Signups is copied to a dated archive tab first.
+ * This is one click away from deleting a launch's worth of real entries, and
+ * an archive tab is trivial to delete afterwards while the entries are not
+ * recoverable once gone. Delete the "Archive ..." tab if you do not want it.
+ *
+ * Takes the lock: clearing mid-signup would leave a submission half written.
+ *
+ * Returns { moved, archiveName }.
+ */
+function resetSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('No spreadsheet attached.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    throw new Error('A signup or a stats sync is mid-write. Wait a few seconds and run it again.');
+  }
+
+  try {
+    var signups = ss.getSheetByName(SHEET_NAME);
+    var moved = 0, archiveName = '';
+
+    if (signups && signups.getLastRow() > 1) {
+      var data = signups.getRange(2, 1, signups.getLastRow() - 1, HEADERS.length).getValues();
+
+      // Skip rows that are blank in both Timestamp and Claim ID - leftovers
+      // rather than entries, and not worth archiving.
+      data = data.filter(function (r) {
+        return String(r[0]).trim() !== '' || String(r[HEADERS.indexOf('Claim ID')]).trim() !== '';
+      });
+
+      if (data.length) {
+        archiveName = 'Archive ' + Utilities.formatDate(
+          new Date(), Session.getScriptTimeZone(), 'dd MMM yyyy HH-mm-ss');
+        var arch = ss.insertSheet(archiveName);
+        arch.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]).setFontWeight('bold');
+        arch.setFrozenRows(1);
+        arch.getRange(2, HEADERS.indexOf('Phone') + 1, data.length, 1).setNumberFormat('@');
+        arch.getRange(2, 1, data.length, HEADERS.length).setValues(data);
+        moved = data.length;
+      }
+    }
+
+    // clear(), not clearContents(): formats go too, so a column cannot carry
+    // an old format into whatever lands there next.
+    [signups, ss.getSheetByName(STATS_SHEET_NAME)].forEach(function (sh) {
+      if (!sh) return;
+      var rows = sh.getMaxRows();
+      if (rows > 1) sh.getRange(2, 1, rows - 1, sh.getMaxColumns()).clear();
+    });
+
+    Logger.log('Reset done. ' +
+      (moved ? moved + ' entr' + (moved === 1 ? 'y' : 'ies') + ' archived to "' + archiveName + '".'
+             : 'Nothing to archive.') +
+      ' Both tabs are empty; the next signup lands in row 2.');
+
+    return { moved: moved, archiveName: archiveName };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Menu handler: confirm first, since this clears every entry. */
+function startFresh() {
+  var ui = SpreadsheetApp.getUi();
+  var answer = ui.alert(
+    'Start fresh?',
+    'This clears every signup and the whole stats tab.\n\n' +
+    'Current entries are copied to a dated "Archive ..." tab first, which you ' +
+    'can delete afterwards.\n\nContinue?',
+    ui.ButtonSet.YES_NO);
+
+  if (answer !== ui.Button.YES) return;
+
+  try {
+    var r = resetSheets();
+    ui.alert('Ready to go',
+      (r.moved
+        ? r.moved + ' entr' + (r.moved === 1 ? 'y was' : 'ies were') +
+          ' archived to "' + r.archiveName + '".\n\n'
+        : 'There was nothing to archive.\n\n') +
+      'Both tabs are empty. The next link generated starts a fresh list.',
+      ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Could not reset', String(e && e.message ? e.message : e), ui.ButtonSet.OK);
+  }
+}
+
 /** Adds a "Link Generator" menu whenever the spreadsheet is opened. */
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Link Generator')
     .addItem('Refresh stats now', 'refreshNow')
+    .addSeparator()
+    .addItem('Start fresh (clear all entries)', 'startFresh')
     .addToUi();
 }
 
