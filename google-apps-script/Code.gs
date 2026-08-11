@@ -511,6 +511,32 @@ function diagnoseStats() {
              '  link=' + (c.link || ''));
   });
 
+  // Every field the LIVE API actually sends, which is not necessarily every
+  // field the docs list. If a click count exists undocumented, it shows up
+  // here - and a field we never read is the one way this tab could be
+  // understating a number that really is available.
+  if (seen.length) {
+    var richest = seen[0];
+    seen.forEach(function (c) {
+      if (Number(c.attributed_users || 0) > Number(richest.attributed_users || 0)) richest = c;
+    });
+
+    out.push('');
+    out.push('Fields the live API returns: ' + Object.keys(richest).sort().join(', '));
+
+    var countish = Object.keys(richest).filter(function (k) {
+      return /click|view|visit|tap|open|count|install|user|session|impression/i.test(k);
+    });
+    out.push('Anything count-shaped among them: ' +
+             (countish.length ? countish.map(function (k) {
+               return k + '=' + JSON.stringify(richest[k]);
+             }).join(', ') : 'only attributed_users'));
+
+    out.push('');
+    out.push('Highest-install campaign in full:');
+    out.push('   ' + JSON.stringify(richest));
+  }
+
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) {
     out.push('');
@@ -542,24 +568,38 @@ function diagnoseStats() {
   out.push('Sheet codes with NO matching campaign: ' + unmatched.length +
            (unmatched.length ? '  -> ' + unmatched.slice(0, 15).join(', ') : ''));
 
+  // Every combination reaches a verdict. An earlier version only concluded
+  // "found but zero" when the whole ACCOUNT summed to zero, so a case with
+  // installs on other campaigns fell through all the branches and printed no
+  // verdict at all - the one situation the function exists to explain.
   out.push('');
-  if (unmatched.length && !matched) {
+  if (!matched && unmatched.length) {
     out.push('READ: nothing matched. The codes on the sheet do not correspond to');
     out.push('any campaign on this Linkrunner account - most likely the key here');
     out.push('belongs to a different Linkrunner project than the dashboard you');
     out.push('are looking at.');
-  } else if (matched && !nonzero && total === 0) {
-    out.push('READ: the campaigns were all found, and Linkrunner itself reports');
-    out.push('attributed_users = 0 for every one of them. The sheet is showing');
-    out.push('exactly what the API returns, so the zeros are not a bug here.');
-    out.push('attributed_users counts APP INSTALLS attributed through the');
-    out.push('Linkrunner SDK. Link clicks are a different number, and their');
-    out.push('public API does not expose clicks at all - so if the dashboard');
-    out.push('figure you are comparing against is clicks or visits, it will');
-    out.push('never match this column.');
   } else if (matched && nonzero) {
     out.push('READ: matching works and real install counts are coming through.');
     out.push('Run syncLinkStats() and the tab should agree with this.');
+  } else if (matched) {
+    out.push('READ: all ' + matched + ' referral campaigns were found, and Linkrunner');
+    out.push('itself reports attributed_users = 0 for every one of them. The tab');
+    out.push('is showing exactly what the API returns, so the zeros are not a bug.');
+    out.push('');
+    out.push('attributed_users counts APP INSTALLS attributed through the');
+    out.push('Linkrunner SDK - someone tapping the link, installing the app, and');
+    out.push('the SDK tying that install back to the campaign. Link CLICKS are a');
+    out.push('separate number, and their public API does not expose clicks at');
+    out.push('all, so a dashboard figure showing clicks or visits can never');
+    out.push('agree with this column.');
+    if (total > 0) {
+      out.push('');
+      out.push('Note: ' + total + ' install(s) do exist on this account, just on');
+      out.push('campaigns other than these ' + matched + '. So attribution itself is');
+      out.push('working - it is these referral links that have no installs yet.');
+    }
+  } else {
+    out.push('READ: no referral codes on the sheet to check yet.');
   }
 
   Logger.log(out.join('\n'));
