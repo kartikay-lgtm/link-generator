@@ -1,0 +1,420 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Share buttons — spec &amp; working demo</title>
+
+<style>
+  /* ── page chrome (NOT part of the spec — just for this document) ────── */
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#FCFCFA}
+  body{
+    color:#0A0A0A; font-size:16px; line-height:1.6;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:48px clamp(16px,5vw,24px) 96px}
+  h1{font-size:clamp(1.7rem,4vw,2.3rem); line-height:1.15; margin:0 0 8px}
+  h2{font-size:1.15rem; margin:44px 0 12px; padding-top:22px; border-top:1px solid rgba(10,10,10,0.10)}
+  h3{font-size:0.95rem; margin:26px 0 8px; letter-spacing:0.01em}
+  p{margin:10px 0; text-wrap:pretty}
+  .lede{color:#6E6E72; margin-bottom:4px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.88em;
+    background:rgba(10,10,10,0.055); padding:2px 5px; border-radius:5px}
+  pre{background:#0A0A0A; color:#F2F0EC; padding:16px 18px; border-radius:12px;
+    overflow-x:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12.5px; line-height:1.6; margin:12px 0}
+  pre code{background:none; padding:0; color:inherit; font-size:inherit}
+  table{border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; display:block; overflow-x:auto}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid rgba(10,10,10,0.10); white-space:nowrap}
+  th{font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#6E6E72}
+  .swatch{display:inline-block; width:13px; height:13px; border-radius:3px;
+    border:1px solid rgba(10,10,10,0.16); vertical-align:-2px; margin-right:7px}
+  .demo{padding:26px 22px; border-radius:16px; background:rgba(10,10,10,0.025);
+    border:1px solid rgba(10,10,10,0.10); margin:16px 0}
+  .demo-label{font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#9A9A97; margin-bottom:14px}
+  .note{border-left:3px solid #0A0A0A; padding:2px 0 2px 14px; margin:14px 0; color:#3A3A37}
+  .hidden{display:none}
+
+  /* ══════════════════════════════════════════════════════════════════════
+     THE SPEC STARTS HERE. Everything below is production CSS, copied
+     verbatim from link-generator-tan.vercel.app.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  /* Copy first, then post. The copy button is the filled one because it is
+     the step that actually has to happen — neither X nor LinkedIn accepts
+     pre-filled text reliably, so the caption has to be on the clipboard
+     before either of the two below is worth pressing. */
+  .copy-btn{
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    width:100%; margin-top:18px; min-height:52px; padding:14px 20px;
+    font-family:inherit; font-size:15.5px; line-height:1.2; letter-spacing:0.01em;
+    color:#FFFFFF; background:#0A0A0A; border:none; border-radius:999px;
+    cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+  }
+  .copy-btn:hover{background:#3A3A37; transform:translateY(-1px)}
+  .copy-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.26)}
+  .copy-btn svg{flex:0 0 auto}
+
+  /* flex-basis 0 rather than auto, so the two halves stay equal regardless
+     of which label is longer — "Post on LinkedIn" is wider than "Post on X"
+     and with auto it would take the larger share. */
+  .share-row{display:flex; gap:10px; margin-top:10px}
+  .share-btn{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    flex:1 1 0; min-width:0; width:auto; margin-top:0; min-height:48px; padding:12px 14px;
+    font-family:inherit; font-size:14.5px; line-height:1.2; letter-spacing:0.01em;
+    color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16); border-radius:999px;
+    cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+    white-space:nowrap;
+  }
+  /* Doubled class beats a generic `button:hover` rule, which otherwise wins
+     on specificity (element + 2 pseudo-classes) and paints this black
+     WITHOUT flipping the text, leaving black-on-black. */
+  .share-btn.share-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
+  .share-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
+  .share-btn svg{flex:0 0 auto}
+
+  /* On a phone the halves are ~164px and "Post on LinkedIn" wraps to two
+     lines while "Post on X" stays on one, so the pair reads as uneven even
+     though the boxes match. Tighten the label rather than let it break. */
+  @media (max-width: 430px){
+    .share-btn{font-size:13.5px; padding:12px 10px; gap:6px}
+  }
+
+  .share-note{margin-top:12px; font-size:12.5px; line-height:1.4; color:#6E6E72; text-align:center}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.01ms!important; transition-duration:0.01ms!important}
+  }
+</style>
+
+<div class="wrap">
+
+  <h1>Share buttons — spec &amp; working demo</h1>
+  <p class="lede">Copy content · Post on X · Post on LinkedIn. Lifted from the
+    Founding Boss referral page (link-generator). Everything here is production
+    code, not a reconstruction.</p>
+
+  <h2>1. Live demo — hover and click these</h2>
+  <p>These are real. Hover to see the states, click to see the behaviour. The
+    “link” below stands in for whatever your page generates.</p>
+
+  <div class="demo">
+    <div class="demo-label">as it appears on the result page</div>
+
+    <input id="link" type="hidden" value="https://link.tal.club/?c=demo123">
+
+    <button type="button" class="copy-btn" id="copy-content">
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+      <span id="copy-content-label">Copy content</span>
+    </button>
+
+    <div class="share-row">
+      <button type="button" class="share-btn" id="share-x">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        Post on X
+      </button>
+      <button type="button" class="share-btn" id="share-linkedin">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/></svg>
+        Post on LinkedIn
+      </button>
+    </div>
+    <div class="share-note hidden" id="share-note" role="status"></div>
+  </div>
+
+  <div class="note">
+    <strong>Why this arrangement.</strong> Copy is the filled/primary button
+    because it is the step that has to happen. LinkedIn accepts no pre-filled
+    post text at all, so the caption must be on the clipboard before either
+    platform button is worth pressing. The two post buttons are exact halves of
+    the copy button’s width.
+  </div>
+
+  <h2>2. Design tokens</h2>
+
+  <h3>Colour</h3>
+  <table>
+    <tr><th>Token</th><th>Value</th><th>Used for</th></tr>
+    <tr><td><span class="swatch" style="background:#0A0A0A"></span>Ink</td><td><code>#0A0A0A</code></td><td>Copy button fill; text on outline buttons; hover fill</td></tr>
+    <tr><td><span class="swatch" style="background:#3A3A37"></span>Ink hover</td><td><code>#3A3A37</code></td><td>Copy button hover fill only</td></tr>
+    <tr><td><span class="swatch" style="background:#FFFFFF"></span>White</td><td><code>#FFFFFF</code></td><td>Outline button fill; text on filled</td></tr>
+    <tr><td><span class="swatch" style="background:#e8e8e8"></span>Hairline</td><td><code>rgba(10,10,10,0.16)</code></td><td>Outline button border (1px)</td></tr>
+    <tr><td><span class="swatch" style="background:#6E6E72"></span>Muted</td><td><code>#6E6E72</code></td><td>Status note under the buttons</td></tr>
+  </table>
+
+  <h3>Geometry &amp; type</h3>
+  <table>
+    <tr><th></th><th>Copy content</th><th>Post on X / LinkedIn</th></tr>
+    <tr><td>Width</td><td><code>100%</code></td><td><code>flex:1 1 0</code> — exact halves</td></tr>
+    <tr><td>Min height</td><td><code>52px</code></td><td><code>48px</code></td></tr>
+    <tr><td>Padding</td><td><code>14px 20px</code></td><td><code>12px 14px</code></td></tr>
+    <tr><td>Font size</td><td><code>15.5px</code></td><td><code>14.5px</code></td></tr>
+    <tr><td>Radius</td><td><code>999px</code></td><td><code>999px</code></td></tr>
+    <tr><td>Icon</td><td><code>17px</code></td><td><code>16px</code></td></tr>
+    <tr><td>Icon gap</td><td><code>9px</code></td><td><code>8px</code></td></tr>
+    <tr><td>Row gap</td><td colspan="2"><code>10px</code> between the two halves; <code>10px</code> above the row</td></tr>
+  </table>
+
+  <h3>States</h3>
+  <table>
+    <tr><th>State</th><th>Copy content</th><th>Post buttons</th></tr>
+    <tr><td>Rest</td><td>Black fill, white text</td><td>White fill, black text, hairline border</td></tr>
+    <tr><td>Hover</td><td>Fill → <code>#3A3A37</code>, lift <code>-1px</code></td><td><strong>Inverts</strong>: black fill + <strong>white</strong> text, lift <code>-1px</code></td></tr>
+    <tr><td>Focus</td><td><code>0 0 0 3px rgba(10,10,10,0.26)</code></td><td><code>0 0 0 3px rgba(10,10,10,0.18)</code></td></tr>
+    <tr><td>Transition</td><td colspan="2"><code>background-color 120ms ease, transform 120ms ease</code></td></tr>
+    <tr><td>Confirm</td><td>Label → “Copied — now paste it in your post” for 2.6s</td><td>—</td></tr>
+  </table>
+
+  <h2>3. HTML</h2>
+  <p>Icons are inline SVG — no icon font, no CDN. <code>currentColor</code> is
+    what makes them invert with the text on hover.</p>
+  <pre><code>&lt;button type="button" class="copy-btn" id="copy-content"&gt;
+  &lt;svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"&gt;
+    &lt;path fill="none" stroke="currentColor" stroke-width="2" d="M9 9h10v10H9z"/&gt;
+    &lt;path fill="none" stroke="currentColor" stroke-width="2"
+          d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/&gt;
+  &lt;/svg&gt;
+  &lt;span id="copy-content-label"&gt;Copy content&lt;/span&gt;
+&lt;/button&gt;
+
+&lt;div class="share-row"&gt;
+  &lt;button type="button" class="share-btn" id="share-x"&gt;
+    &lt;svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"&gt;&lt;path fill="currentColor"
+      d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/&gt;&lt;/svg&gt;
+    Post on X
+  &lt;/button&gt;
+  &lt;button type="button" class="share-btn" id="share-linkedin"&gt;
+    &lt;svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"&gt;&lt;path fill="currentColor"
+      d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.114 20.452H3.56V9h3.554v11.452z"/&gt;&lt;/svg&gt;
+    Post on LinkedIn
+  &lt;/button&gt;
+&lt;/div&gt;
+&lt;div class="share-note hidden" id="share-note" role="status"&gt;&lt;/div&gt;</code></pre>
+
+  <h2>4. CSS</h2>
+  <p>Verbatim. The two comments marked ⚠ are load-bearing — see §6.</p>
+  <pre><code>.copy-btn{
+  display:flex; align-items:center; justify-content:center; gap:9px;
+  width:100%; margin-top:18px; min-height:52px; padding:14px 20px;
+  font-family:inherit; font-size:15.5px; line-height:1.2; letter-spacing:0.01em;
+  color:#FFFFFF; background:#0A0A0A; border:none; border-radius:999px;
+  cursor:pointer; transition:background-color 120ms ease, transform 120ms ease;
+}
+.copy-btn:hover{background:#3A3A37; transform:translateY(-1px)}
+.copy-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.26)}
+.copy-btn svg{flex:0 0 auto}
+
+/* ⚠ flex-basis 0, not auto — otherwise the longer label takes more width */
+.share-row{display:flex; gap:10px; margin-top:10px}
+.share-btn{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  flex:1 1 0; min-width:0; width:auto; margin-top:0; min-height:48px; padding:12px 14px;
+  font-family:inherit; font-size:14.5px; line-height:1.2; letter-spacing:0.01em;
+  color:#0A0A0A; background:#FFFFFF; border:1px solid rgba(10,10,10,0.16);
+  border-radius:999px; cursor:pointer;
+  transition:background-color 120ms ease, transform 120ms ease;
+  white-space:nowrap;
+}
+/* ⚠ doubled class — beats a generic `button:hover` rule that would otherwise
+   paint the background black without flipping the text */
+.share-btn.share-btn:hover{background:#0A0A0A; color:#FFFFFF; transform:translateY(-1px)}
+.share-btn:focus-visible{outline:none; box-shadow:0 0 0 3px rgba(10,10,10,0.18)}
+.share-btn svg{flex:0 0 auto}
+
+@media (max-width: 430px){
+  .share-btn{font-size:13.5px; padding:12px 10px; gap:6px}
+}
+
+.share-note{margin-top:12px; font-size:12.5px; line-height:1.4; color:#6E6E72; text-align:center}
+.hidden{display:none}</code></pre>
+
+  <h2>5. JavaScript</h2>
+  <p>Plain browser JS, no dependencies. Change <code>shareText()</code> and the
+    LinkedIn fallback URL; everything else ports as-is.</p>
+  <pre><code>function el(id) { return document.getElementById(id); }
+
+/* The link rides INSIDE the text rather than as a separate url param — X folds
+   a bare url param into the text anyway, and this way the message still reads
+   right if a platform keeps only one of the two. */
+function shareText() {
+  var link = el('link').value.trim();
+  var msg  = "I'm hiring on Tal. It's an app where bosses hire directly.";
+  return link ? msg + '\n' + link : msg;
+}
+
+/* A plain new tab, not a popup: no width/height means the browser opens it
+   like a normal clicked link. A fixed-size popup is either ignored on mobile
+   or renders too small to use. */
+function openShare(url) {
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/* ⚠ SYNCHRONOUS on purpose — see §6. */
+function copyToClipboard(text) {
+  var area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  var ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(area);
+  return ok;
+}
+
+function flashShareNote(msg) {
+  var note = el('share-note');
+  note.textContent = msg;
+  note.classList.remove('hidden');
+  clearTimeout(flashShareNote._t);
+  flashShareNote._t = setTimeout(function () { note.classList.add('hidden'); }, 4000);
+}
+
+el('copy-content').addEventListener('click', function () {
+  var label  = el('copy-content-label');
+  var copied = copyToClipboard(shareText());
+  if (copied) {
+    label.textContent = 'Copied — now paste it in your post';
+    clearTimeout(label._t);
+    label._t = setTimeout(function () { label.textContent = 'Copy content'; }, 2600);
+  } else {
+    flashShareNote("couldn't copy automatically — select the text by hand before posting");
+  }
+});
+
+/* Both post buttons copy again on the way out: whoever pressed Copy content
+   first loses nothing, and whoever skipped it still arrives with the caption
+   on their clipboard. */
+el('share-x').addEventListener('click', function () {
+  copyToClipboard(shareText());
+  openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
+});
+
+el('share-linkedin').addEventListener('click', function () {
+  var link = el('link').value.trim();
+  copyToClipboard(shareText());
+  openShare('https://www.linkedin.com/sharing/share-offsite/?url=' +
+            encodeURIComponent(link || 'https://tal.club/'));
+});</code></pre>
+
+  <h2>6. The four things that will bite you</h2>
+
+  <h3>① LinkedIn cannot be pre-filled. At all.</h3>
+  <p>The old <code>shareArticle</code> endpoint accepted <code>title</code> and
+    <code>summary</code>; it silently drops them now. The only supported param
+    on <code>/sharing/share-offsite/</code> is <code>url</code>. The post body
+    is whatever the person types. <strong>This is the entire reason the Copy
+    button exists</strong> — don’t remove it thinking you can pre-fill instead.
+    X <em>does</em> accept <code>?text=</code> and works properly.</p>
+
+  <h3>② Copy must be synchronous, and must happen before <code>window.open</code></h3>
+  <p><code>navigator.clipboard.writeText()</code> resolves as a microtask. Fire
+    it and then call <code>window.open()</code> and you race the new tab taking
+    focus — losing that race makes the Clipboard API throw
+    <em>“document is not focused”</em>, silently, since nothing awaits it. The
+    symptom is “the copy button does nothing”.
+    <code>document.execCommand('copy')</code> completes in the same tick, so it
+    wins that race. Deprecated, still universally supported, and the only thing
+    that works here.</p>
+
+  <h3>③ The hover specificity trap</h3>
+  <p>If your stylesheet has a generic <code>button:hover{background:#0A0A0A}</code>
+    (element + pseudo-class), it outranks <code>.share-btn:hover</code>… no —
+    it <em>ties</em>, and source order decides. In our case it painted the
+    button black without flipping the text, giving <strong>black text on a
+    black button</strong>. The doubled selector
+    <code>.share-btn.share-btn:hover</code> raises specificity so the inversion
+    always wins. Keep it.</p>
+
+  <h3>④ Equal halves need <code>flex:1 1 0</code>, not <code>1 1 auto</code></h3>
+  <p>“Post on LinkedIn” is a wider label than “Post on X”. With
+    <code>auto</code> it claims more width and the pair looks lopsided. With
+    basis <code>0</code> they’re exactly equal. And below 430px the LinkedIn
+    label wraps to two lines while X stays on one — hence
+    <code>white-space:nowrap</code> plus the small type reduction in the media
+    query.</p>
+
+  <h2>7. Porting to gift.tal.club</h2>
+  <table>
+    <tr><th>Change</th><th>Where</th></tr>
+    <tr><td>The message</td><td><code>shareText()</code> — the <code>msg</code> string</td></tr>
+    <tr><td>Where the link comes from</td><td><code>el('link').value</code> → whatever holds the gift/referral link</td></tr>
+    <tr><td>LinkedIn fallback URL</td><td>the <code>|| 'https://tal.club/'</code> in the LinkedIn handler</td></tr>
+    <tr><td>Nothing else</td><td>CSS and structure port unchanged</td></tr>
+  </table>
+  <p>Requires: an element whose <code>.value</code> is the link, and a
+    <code>#share-note</code> div. If your link lives in a
+    <code>&lt;div&gt;</code> rather than an input, swap <code>.value</code> for
+    <code>.textContent</code> in <code>shareText()</code> and the LinkedIn
+    handler.</p>
+
+  <div class="note">
+    <strong>One caveat worth keeping.</strong> The X button pre-fills properly,
+    the LinkedIn one cannot. That asymmetry is LinkedIn’s, not a bug to fix —
+    the copy-first flow is the workaround, and the confirmation label is what
+    tells people to paste.
+  </div>
+
+</div>
+
+<script>
+  /* Identical to production, minus the form wiring. */
+  function el(id) { return document.getElementById(id); }
+
+  function shareText() {
+    var link = el('link').value.trim();
+    var msg  = "I'm hiring on Tal. It's an app where bosses hire directly.";
+    return link ? msg + '\n' + link : msg;
+  }
+
+  function openShare(url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function copyToClipboard(text) {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(area);
+    return ok;
+  }
+
+  function flashShareNote(msg) {
+    var note = el('share-note');
+    note.textContent = msg;
+    note.classList.remove('hidden');
+    clearTimeout(flashShareNote._t);
+    flashShareNote._t = setTimeout(function () { note.classList.add('hidden'); }, 4000);
+  }
+
+  el('copy-content').addEventListener('click', function () {
+    var label  = el('copy-content-label');
+    var copied = copyToClipboard(shareText());
+    if (copied) {
+      label.textContent = 'Copied — now paste it in your post';
+      clearTimeout(label._t);
+      label._t = setTimeout(function () { label.textContent = 'Copy content'; }, 2600);
+    } else {
+      flashShareNote("couldn't copy automatically — select the text by hand before posting");
+    }
+  });
+
+  el('share-x').addEventListener('click', function () {
+    copyToClipboard(shareText());
+    openShare('https://twitter.com/intent/tweet?text=' + encodeURIComponent(shareText()));
+  });
+
+  el('share-linkedin').addEventListener('click', function () {
+    var link = el('link').value.trim();
+    copyToClipboard(shareText());
+    openShare('https://www.linkedin.com/sharing/share-offsite/?url=' +
+              encodeURIComponent(link || 'https://tal.club/'));
+  });
+</script>
